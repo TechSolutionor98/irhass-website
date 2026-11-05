@@ -7,6 +7,9 @@ import { X, Download, Smartphone, Star } from "lucide-react"
 
 
 
+
+
+
 const AppDownloadPopup = () => {
   const [isOpen, setIsOpen] = useState(false)
   const [hasClosedPopup, setHasClosedPopup] = useState(false)

@@ -7,6 +7,9 @@ const ACTIVE_ORDER_QUERY = {
   documentType: { $ne: "quotation" },
 }
 
+
+
+
 const sanitizeOrderItems = (orderItems = []) => {
   return (Array.isArray(orderItems) ? orderItems : [])
     .filter((item) => item && !item.isProtection)
