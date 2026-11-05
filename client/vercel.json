@@ -1,0 +1,74 @@
+{
+    "buildCommand": "npm run build",
+    "outputDirectory": "dist",
+    "framework": "vite",
+    "rewrites": [
+        {
+            "source": "/robot.txt",
+            "destination": "/robots.txt"
+        },
+        {
+            "source": "/sitemap.xml",
+            "destination": "https://api.irhaas.com/sitemap.xml"
+        },
+        {
+            "source": "/:key([a-f0-9]{32})\\.txt",
+            "destination": "https://api.irhaas.com/:key.txt"
+        },
+        {
+            "source": "/acer-products/:path*",
+            "destination": "https://api.irhaas.com/acer-products/:path*"
+        },
+        {
+            "source": "/(.*)",
+            "destination": "/app.html"
+        }
+    ],
+    "headers": [
+        {
+            "source": "/assets/(.*)",
+            "headers": [
+                {
+                    "key": "Cache-Control",
+                    "value": "public, max-age=31536000, immutable"
+                }
+            ]
+        },
+        {
+            "source": "/fonts/(.*)",
+            "headers": [
+                {
+                    "key": "Cache-Control",
+                    "value": "public, max-age=31536000, immutable"
+                }
+            ]
+        },
+        {
+            "source": "/(.*)\\.(webp|png|jpg|jpeg|svg|ico|gif)",
+            "headers": [
+                {
+                    "key": "Cache-Control",
+                    "value": "public, max-age=2592000, stale-while-revalidate=86400"
+                }
+            ]
+        },
+        {
+            "source": "/(index|app)\\.html",
+            "headers": [
+                {
+                    "key": "Cache-Control",
+                    "value": "public, max-age=0, must-revalidate"
+                }
+            ]
+        },
+        {
+            "source": "/",
+            "headers": [
+                {
+                    "key": "Cache-Control",
+                    "value": "public, max-age=0, must-revalidate"
+                }
+            ]
+        }
+    ]
+}

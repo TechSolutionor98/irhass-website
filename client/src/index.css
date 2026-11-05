@@ -1,0 +1,387 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------------------------------------------------------
+   Number inputs
+   ---------------------------------------------------------------------------
+   The browser's stepper arrows are hidden everywhere. They sit on top of the
+   value in narrow fields, and a stray click nudges a price or a quantity
+   without anyone noticing -- the same reason wheel-scrolling is disabled on
+   these fields (see components/DisableNumberInputScroll.jsx).
+
+   Typing, arrow keys, min/max and step validation all still work; only the
+   spinner chrome is gone. Where stepping matters the screen provides its own
+   -/+ buttons (cart, checkout, create order).
+   --------------------------------------------------------------------------- */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield; /* Firefox */
+  appearance: textfield;
+}
+
+/* ---------------------------------------------------------------------------
+   Theme variables
+   ---------------------------------------------------------------------------
+   Every themeable colour in tailwind.config.js reads one of these. The values
+   below are the palette the site shipped with, so an untouched install -- or a
+   browser that never reaches /api/theme -- renders exactly as before.
+
+   ThemeProvider (src/context/ThemeContext.jsx) overwrites these on <html> at
+   runtime from the admin's saved theme. It does that on storefront routes only:
+   /admin and /superadmin always fall back to the values here, so a colour
+   picked badly in the admin panel can never make the admin panel unreadable.
+
+   Values are "r g b" channel triplets, not hex, because Tailwind needs
+   rgb(var(--x) / <alpha-value>) for opacity modifiers (bg-brand-500/40).
+   --------------------------------------------------------------------------- */
+:root {
+  /* Brand ramp -- the Irha's Wardrobe gold, which `lime-*` and `brand-*` both use */
+  --brand-50: 250 246 240;
+  --brand-100: 242 233 220;
+  --brand-200: 229 211 186;
+  --brand-300: 213 185 147;
+  --brand-400: 194 159 111;
+  --brand-500: 180 135 74;
+  --brand-600: 142 105 55;
+  --brand-700: 104 78 44;
+  --brand-800: 83 64 39;
+  --brand-900: 68 54 35;
+  --brand-950: 29 22 12;
+
+  /* Header */
+  --header-bg: 255 255 255;
+  --header-text: 24 24 22;
+  --header-icon: 24 24 22;
+  --header-border: 231 229 228;
+  --header-search-bg: 142 105 55;
+  --header-search-hover-bg: 104 78 44;
+  --header-search-text: 255 255 255;
+  --header-badge-bg: 24 24 22;
+  --header-badge-text: 255 255 255;
+
+  /* Category navigation bar */
+  --nav-bg: 255 255 255;
+  --nav-text: 24 24 22;
+  --nav-hover-bg: 255 255 255;
+  --nav-hover-text: 142 105 55;
+  --nav-indicator: 24 24 22;
+  --nav-btn-bg: 180 135 74;
+  --nav-btn-text: 255 255 255;
+  --nav-dropdown-bg: 255 255 255;
+  --nav-dropdown-text: 68 64 60;
+  --nav-dropdown-hover-bg: 250 246 240;
+  --nav-dropdown-hover-text: 104 78 44;
+
+  /* Footer -- dark panel on desktop, white accordion on mobile */
+  --footer-bg: 24 24 22;
+  --footer-text: 255 255 255;
+  --footer-heading: 255 255 255;
+  --footer-link: 255 255 255;
+  --footer-link-hover: 194 159 111;
+  --footer-border: 42 39 36;
+  --footer-bottom-bg: 17 17 16;
+  --footer-bottom-text: 255 255 255;
+  --footer-mobile-bg: 255 255 255;
+  --footer-mobile-text: 68 64 60;
+  --footer-mobile-heading: 24 24 22;
+  --footer-mobile-link-hover: 142 105 55;
+
+  /* Buttons */
+  --btn-primary-bg: 142 105 55;
+  --btn-primary-hover-bg: 104 78 44;
+  --btn-primary-text: 255 255 255;
+  --btn-secondary-bg: 24 24 22;
+  --btn-secondary-hover-bg: 42 39 36;
+  --btn-secondary-text: 255 255 255;
+  --btn-secondary-border: 24 24 22;
+
+  /* Page surfaces and typography */
+  --page-bg: 255 255 255;
+  --page-surface: 250 246 240;
+  --page-text: 68 64 60;
+  --page-heading: 24 24 22;
+  --page-muted: 120 113 108;
+  --page-link: 142 105 55;
+  --page-link-hover: 104 78 44;
+  --page-border: 231 229 228;
+  --page-price: 24 24 22;
+  --page-old-price: 168 162 158;
+}
+
+/* Content links.
+   An element selector, so it only reaches links that carry no colour class of
+   their own -- any Tailwind `text-*` class has higher specificity and still
+   wins. That keeps this from repainting buttons and nav items that happen to be
+   anchors, while giving plain in-content links a themeable colour. */
+main a:not([class*="text-"]):not([class*="bg-"]) {
+  color: rgb(var(--page-link));
+}
+
+main a:not([class*="text-"]):not([class*="bg-"]):hover {
+  color: rgb(var(--page-link-hover));
+}
+
+/* RTL Support for Arabic Language */
+[dir="rtl"] {
+  text-align: right;
+}
+
+[dir="rtl"] .flex-row {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] .space-x-2 > :not([hidden]) ~ :not([hidden]) {
+  --tw-space-x-reverse: 1;
+}
+
+[dir="rtl"] .space-x-3 > :not([hidden]) ~ :not([hidden]) {
+  --tw-space-x-reverse: 1;
+}
+
+[dir="rtl"] .space-x-4 > :not([hidden]) ~ :not([hidden]) {
+  --tw-space-x-reverse: 1;
+}
+
+[dir="rtl"] .mr-2 {
+  margin-right: 0;
+  margin-left: 0.5rem;
+}
+
+[dir="rtl"] .mr-3 {
+  margin-right: 0;
+  margin-left: 0.75rem;
+}
+
+[dir="rtl"] .ml-2 {
+  margin-left: 0;
+  margin-right: 0.5rem;
+}
+
+[dir="rtl"] .ml-3 {
+  margin-left: 0;
+  margin-right: 0.75rem;
+}
+
+[dir="rtl"] .ml-auto {
+  margin-left: 0;
+  margin-right: auto;
+}
+
+[dir="rtl"] .pl-3 {
+  padding-left: 0;
+  padding-right: 0.75rem;
+}
+
+[dir="rtl"] .pr-3 {
+  padding-left: 0.75rem;
+  padding-right: 0;
+}
+
+[dir="rtl"] .left-0 {
+  left: auto;
+  right: 0;
+}
+
+[dir="rtl"] .right-0 {
+  right: auto;
+  left: 0;
+}
+
+[dir="rtl"] .-right-1 {
+  right: auto;
+  left: -0.25rem;
+}
+
+[dir="rtl"] .-left-1 {
+  left: auto;
+  right: -0.25rem;
+}
+
+/* Arabic font support */
+.font-arabic {
+  font-family: 'Noto Sans Arabic', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+[dir="rtl"] body {
+  font-family: 'Noto Sans Arabic', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* Ensure proper text alignment in RTL mode */
+[dir="rtl"] input,
+[dir="rtl"] textarea {
+  text-align: right;
+}
+
+[dir="rtl"] input[type="email"],
+[dir="rtl"] input[type="url"],
+[dir="rtl"] input[type="tel"] {
+  text-align: left;
+  direction: ltr;
+}
+
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.home-loader-wrap {
+  min-height: 24rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.home-loader {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: 6px solid #e5e7eb;
+  border-top-color: rgb(var(--brand-500));
+  border-right-color: #16a34a;
+  animation: home-loader-spin 0.9s linear infinite;
+  box-shadow: 0 0 0 8px rgb(var(--brand-500) / 0.12);
+}
+
+@keyframes home-loader-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@layer utilities {
+  .animate-blob {
+    animation: blob 7s infinite;
+  }
+
+  .animate-gradient-x {
+    background-size: 200% 200%;
+    animation: gradient-x 15s ease infinite;
+  }
+
+  .animation-delay-2000 {
+    animation-delay: 2s;
+  }
+
+  .animation-delay-4000 {
+    animation-delay: 4s;
+  }
+
+  .animate-float {
+    animation: float-particle 20s ease-in-out infinite;
+  }
+
+  .animate-float-slow {
+    animation: float-slow 25s ease-in-out infinite;
+  }
+
+  .animation-delay-1000 {
+    animation-delay: 1s;
+  }
+
+  .animation-delay-3000 {
+    animation-delay: 3s;
+  }
+
+  .animation-delay-5000 {
+    animation-delay: 5s;
+  }
+
+  .animation-delay-7000 {
+    animation-delay: 7s;
+  }
+
+  @keyframes blob {
+    0% {
+      transform: translate(0px, 0px) scale(1);
+    }
+
+    33% {
+      transform: translate(30px, -50px) scale(1.1);
+    }
+
+    66% {
+      transform: translate(-20px, 20px) scale(0.9);
+    }
+
+    100% {
+      transform: translate(0px, 0px) scale(1);
+    }
+  }
+
+  @keyframes gradient-x {
+
+    0%,
+    100% {
+      background-position: 0% 50%;
+    }
+
+    50% {
+      background-position: 100% 50%;
+    }
+  }
+
+  @keyframes float-particle {
+
+    0%,
+    100% {
+      transform: translate(0, 0) rotate(0deg);
+      opacity: 0.3;
+    }
+
+    25% {
+      transform: translate(100px, -100px) rotate(90deg);
+      opacity: 0.6;
+    }
+
+    50% {
+      transform: translate(200px, -50px) rotate(180deg);
+      opacity: 0.4;
+    }
+
+    75% {
+      transform: translate(100px, -150px) rotate(270deg);
+      opacity: 0.5;
+    }
+  }
+
+  @keyframes float-slow {
+
+    0%,
+    100% {
+      transform: translate(0, 0) rotate(0deg) scale(1);
+      opacity: 0.2;
+    }
+
+    33% {
+      transform: translate(-80px, -120px) rotate(120deg) scale(1.2);
+      opacity: 0.5;
+    }
+
+    66% {
+      transform: translate(-150px, -60px) rotate(240deg) scale(0.8);
+      opacity: 0.3;
+    }
+  }
+}

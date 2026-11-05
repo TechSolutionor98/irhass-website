@@ -1,0 +1,569 @@
+
+import mongoose from "mongoose"
+
+const productSchema = mongoose.Schema(
+  {
+    name: {
+      type: String,
+      required: true,
+    },
+    nameAr: {
+      type: String,
+      default: "",
+    },
+    sku: {
+      type: String,
+      unique: true,
+      sparse: true, // allows null/undefined values but ensures non-null values are unique
+    },
+    slug: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    barcode: {
+      type: String,
+      unique: true,
+      sparse: true, // allows null/undefined values but ensures non-null values are unique
+    },
+    gtin: {
+      type: String,
+      unique: true,
+      sparse: true, // GTIN number for Google Merchant feed
+    },
+    stockStatus: {
+      type: String,
+      required: true,
+      default: "In Stock",
+      enum: ["In Stock", "Out of Stock", "PreOrder"],
+    },
+    stockStatusAr: {
+      type: String,
+      default: "",
+    },
+    brand: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Brand",
+      required: true,
+    },
+    series: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ProductSystemOption",
+      default: null,
+    },
+    model: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ProductSystemOption",
+      default: null,
+    },
+    make: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ProductSystemOption",
+      default: null,
+    },
+    manufacturer: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ProductSystemOption",
+      default: null,
+    },
+    soldBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ProductSystemOption",
+      default: null,
+    },
+    // Main category (shown in navbar)
+    parentCategory: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Category",
+      required: true,
+    },
+    parentCategoryName: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    parentCategorySlug: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    // Subcategory Level 1 (shown in dropdown)
+    category: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "SubCategory",
+    },
+    categoryName: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    categorySlug: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    // Subcategory Level 2 (optional)
+    subCategory2: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "SubCategory",
+    },
+    subCategory2Name: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    subCategory2Slug: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    // Subcategory Level 3 (optional)
+    subCategory3: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "SubCategory",
+    },
+    subCategory3Name: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    subCategory3Slug: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    // Subcategory Level 4 (optional)
+    subCategory4: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "SubCategory",
+    },
+    subCategory4Name: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    subCategory4Slug: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    // Keep old category field for backward compatibility
+    subCategory: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "SubCategory",
+    },
+    description: {
+      type: String,
+      required: true,
+    },
+    descriptionAr: {
+      type: String,
+      default: "",
+    },
+    shortDescription: {
+      type: String,
+    },
+    shortDescriptionAr: {
+      type: String,
+      default: "",
+    },
+    buyingPrice: {
+      type: Number,
+      required: true,
+      default: 0,
+    },
+    // Optional. Defaults to null rather than 0 so "no wholesale price set" stays
+    // distinguishable from "the wholesale price is zero" -- whatever this ends up
+    // driving, that difference is the one you cannot recover later.
+    wholesalePrice: {
+      type: Number,
+      default: null,
+    },
+    price: {
+      type: Number,
+      required: true,
+      default: 0,
+    },
+    offerPrice: {
+      type: Number,
+      default: 0,
+    },
+    discount: {
+      type: Number,
+      default: 0,
+    },
+    oldPrice: {
+      type: Number,
+    },
+    image: {
+      type: String,
+    },
+    galleryImages: [
+      {
+        type: String,
+      },
+    ],
+    video: {
+      type: String,
+    },
+    videoGallery: [
+      {
+        type: String,
+      },
+    ],
+    countInStock: {
+      type: Number,
+      required: true,
+      default: 0,
+    },
+    targetCountries: {
+      type: [String],
+      default: ["ALL"],
+    },
+    countryStock: [
+      {
+        country: { type: String, required: true },
+        countInStock: { type: Number, default: 0 },
+      },
+    ],
+    lowStockWarning: {
+      type: Number,
+      default: 5,
+    },
+    maxPurchaseQty: {
+      type: Number,
+      default: 10,
+    },
+    weight: {
+      type: Number,
+      default: 0,
+    },
+    unit: {
+      type: String,
+      default: "piece",
+    },
+    tax: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Tax",
+    },
+    deliveryCharge: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "DeliveryCharge",
+    },
+    tags: [
+      {
+        type: String,
+      },
+    ],
+    tagsAr: [
+      {
+        type: String,
+      },
+    ],
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+    onHold: {
+      type: Boolean,
+      default: false,
+    },
+    canPurchase: {
+      type: Boolean,
+      default: true,
+    },
+    showStockOut: {
+      type: Boolean,
+      default: true,
+    },
+    refundable: {
+      type: Boolean,
+      default: true,
+    },
+    featured: {
+      type: Boolean,
+      default: false,
+    },
+    hideFromShop: {
+      type: Boolean,
+      default: false,
+    },
+    rating: {
+      type: Number,
+      default: 0,
+    },
+    numReviews: {
+      type: Number,
+      default: 0,
+    },
+    specifications: [
+      {
+        key: { type: String },
+        keyAr: { type: String, default: "" },
+        value: { type: String },
+        valueAr: { type: String, default: "" },
+      },
+    ],
+    reviews: [
+      {
+        name: { type: String, required: true },
+        rating: { type: Number, required: true },
+        comment: { type: String, required: true },
+        user: {
+          type: mongoose.Schema.Types.ObjectId,
+          required: true,
+          ref: "User",
+        },
+      },
+      {
+        timestamps: true,
+      },
+    ],
+    variations: [
+      {
+        product: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Product",
+        },
+        variationText: {
+          type: String,
+          default: "",
+        },
+        variationTextAr: {
+          type: String,
+          default: "",
+        },
+      },
+    ],
+    reverseVariationText: {
+      type: String,
+      default: "",
+    },
+    reverseVariationTextAr: {
+      type: String,
+      default: "",
+    },
+    // The label for this product when shown in variation lists (e.g., "16GB RAM", "24GB RAM")
+    selfVariationText: {
+      type: String,
+      default: "",
+    },
+    selfVariationTextAr: {
+      type: String,
+      default: "",
+    },
+    availableModels: [
+      {
+        product: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Product",
+        },
+        variationText: {
+          type: String,
+          default: "",
+        },
+        variationTextAr: {
+          type: String,
+          default: "",
+        },
+      },
+    ],
+    selfAvailableModelText: {
+      type: String,
+      default: "",
+    },
+    selfAvailableModelTextAr: {
+      type: String,
+      default: "",
+    },
+    colorVariations: [
+      {
+        color: {
+          type: String,
+          default: "",
+        },
+        image: {
+          type: String,
+          default: "",
+        },
+        galleryImages: [
+          {
+            type: String,
+          },
+        ],
+        buyingPrice: {
+          type: Number,
+          default: 0,
+        },
+        // Optional, same as on the parent product: null means "not set", which
+        // stays distinct from a wholesale price of zero.
+        wholesalePrice: {
+          type: Number,
+          default: null,
+        },
+        price: {
+          type: Number,
+          default: 0,
+        },
+        offerPrice: {
+          type: Number,
+          default: 0,
+        },
+        sku: {
+          type: String,
+          default: "",
+        },
+        countInStock: {
+          type: Number,
+          default: 0,
+        },
+      },
+    ],
+    currentProductColor: {
+      type: String,
+      default: "",
+    },
+    dosVariations: [
+      {
+        dosType: {
+          type: String,
+          default: "",
+        },
+        image: {
+          type: String,
+          default: "",
+        },
+        galleryImages: [
+          {
+            type: String,
+          },
+        ],
+        buyingPrice: {
+          type: Number,
+          default: 0,
+        },
+        // Optional, same as on the parent product: null means "not set", which
+        // stays distinct from a wholesale price of zero.
+        wholesalePrice: {
+          type: Number,
+          default: null,
+        },
+        price: {
+          type: Number,
+          default: 0,
+        },
+        offerPrice: {
+          type: Number,
+          default: 0,
+        },
+        sku: {
+          type: String,
+          default: "",
+        },
+        countInStock: {
+          type: Number,
+          default: 0,
+        },
+      },
+    ],
+    variationsDisplayType: {
+      type: String,
+      enum: ["button", "card"],
+      default: "button",
+    },
+    availableModelsDisplayType: {
+      type: String,
+      enum: ["button", "card"],
+      default: "button",
+    },
+    colorVariationsDisplayType: {
+      type: String,
+      enum: ["button", "card"],
+      default: "card",
+    },
+    // SEO Fields (only used for meta tags, not displayed on frontend)
+    seoTitle: {
+      type: String,
+      default: "",
+    },
+    seoDescription: {
+      type: String,
+      default: "",
+    },
+    seoKeywords: {
+      type: String,
+      default: "",
+    },
+    seoCanonicalUrl: {
+      type: String,
+      default: "",
+    },
+    seoRobots: {
+      type: String,
+      default: "index, follow",
+      enum: ["index, follow", "noindex, follow", "index, nofollow", "noindex, nofollow"],
+    },
+    customSchema: {
+      type: String,
+      default: "",
+    },
+    ogTitle: {
+      type: String,
+      default: "",
+    },
+    ogDescription: {
+      type: String,
+      default: "",
+    },
+    ogImage: {
+      type: String,
+      default: "",
+    },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    paymentMethods: {
+      type: [String],
+      enum: ["card", "cod", "tamara", "tabby"],
+      default: undefined,
+    },
+
+    // Loyalty earning override for this product. Kept on the product (rather than in the
+    // LoyaltyRule collection) so the shop grid and product page can render "earn N points"
+    // from the document they already loaded.
+    //   inherit    -> fall through to the category rule, then the global rate
+    //   multiplier -> global rate x loyaltyPointsMultiplier
+    //   fixed      -> exactly loyaltyPointsFixed points per unit, whatever the price
+    //   none       -> this product never earns points
+    loyaltyPointsMode: {
+      type: String,
+      enum: ["inherit", "multiplier", "fixed", "none"],
+      default: "inherit",
+    },
+    loyaltyPointsMultiplier: {
+      type: Number,
+      default: 1,
+      min: 0,
+    },
+    loyaltyPointsFixed: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+  },
+  {
+    timestamps: true,
+  },
+)
+
+productSchema.index({ isActive: 1, hideFromShop: 1, parentCategory: 1, createdAt: -1 }, { background: true })
+productSchema.index({ isActive: 1, hideFromShop: 1, category: 1, createdAt: -1 }, { background: true })
+productSchema.index({ isActive: 1, hideFromShop: 1, subCategory2: 1, createdAt: -1 }, { background: true })
+productSchema.index({ isActive: 1, hideFromShop: 1, subCategory3: 1, createdAt: -1 }, { background: true })
+productSchema.index({ isActive: 1, hideFromShop: 1, subCategory4: 1, createdAt: -1 }, { background: true })
+productSchema.index({ isActive: 1, hideFromShop: 1, createdAt: -1 }, { background: true })
+
+const Product = mongoose.model("Product", productSchema)
+
+export default Product

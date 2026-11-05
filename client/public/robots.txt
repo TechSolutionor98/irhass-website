@@ -1,0 +1,5 @@
+User-agent: *
+Content-Signal: search=yes,ai-train=no,use=reference
+Allow: /
+Disallow: /admin/
+Sitemap: https://www.irhaas.com/sitemap.xml

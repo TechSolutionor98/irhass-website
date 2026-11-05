@@ -1,0 +1,125 @@
+import mongoose from 'mongoose';
+
+const offerPageSchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    slug: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
+    },
+    metaTitle: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    metaDescription: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    canonicalUrl: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    seoTitle: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    seoDescription: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    seoKeywords: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    seoCanonicalUrl: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    seoRobots: {
+      type: String,
+      default: "index, follow",
+      enum: ["index, follow", "noindex, follow", "index, nofollow", "noindex, nofollow"],
+    },
+    customSchema: {
+      type: String,
+      default: "",
+    },
+    ogTitle: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    ogDescription: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    ogImage: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    heroImage: {
+      type: String,
+      default: '',
+    },
+    cardImages: [
+      {
+        image: {
+          type: String,
+          default: '',
+        },
+        order: {
+          type: Number,
+          default: 1,
+        },
+      }
+    ],
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+    order: {
+      type: Number,
+      default: 1,
+      min: 1,
+    },
+    showCategorySlider: {
+      type: Boolean,
+      default: true,
+    },
+    showBrandSlider: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+// Validate max 3 card images
+offerPageSchema.pre('save', function(next) {
+  if (this.cardImages && this.cardImages.length > 3) {
+    next(new Error('Maximum 3 card images allowed'));
+  } else {
+    next();
+  }
+});
+
+const OfferPage = mongoose.model('OfferPage', offerPageSchema);
+
+export default OfferPage;

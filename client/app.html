@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="google-site-verification" content="7L9SSyoDKttO_Mq86f7kYHZoCKnZ76rBW5tZZYyxg1Y" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/logo-512.png" />
+    <link rel="dns-prefetch" href="https://api.irhaas.com" />
+    <link rel="preconnect" href="https://api.irhaas.com" />
+    <title></title>
+
+
+
+
+<!-- Internal-page guard.
+     This shell is served for every path, admin routes included, so each
+     marketing/analytics tag below has to opt out of the staff pages itself.
+     Without it the admin URLs (and the record ids in them) are reported to
+     GTM/GA4, staff sessions pollute the reports, and Clarity records replays
+     of order and customer screens. -->
+<script>
+  window.dataLayer = window.dataLayer || []
+  window.__irhaasInternalPage = (function () {
+    try {
+      return /^\/(admin|superadmin|irhaasadmin|irhaassuperadmin)(\/|$)/.test(
+        (window.location.pathname || "").toLowerCase()
+      )
+    } catch (e) {
+      return false
+    }
+  })()
+</script>
+
+<!-- Saved theme, applied before first paint.
+     ThemeProvider caches the admin's palette as ready-made CSS text, so the
+     first frame is already themed instead of flashing the shipped colours and
+     then swapping. The runtime provider re-applies (and resolves any per-page
+     rule) the moment React mounts, and its inline styles on <html> win over
+     this block -- so a stale cache is corrected, never stuck.
+
+     Skipped on staff pages: /admin keeps the shipped palette, always. -->
+<script>
+  (function () {
+    try {
+      if (window.__irhaasInternalPage) return
+      var css = window.localStorage.getItem("grabatoz-theme-css-v1")
+      if (!css) return
+      var style = document.createElement("style")
+      style.id = "grabatoz-theme-preload"
+      style.textContent = ":root{" + css + "}"
+      document.head.appendChild(style)
+    } catch (e) {
+      /* No storage, or a malformed cache: the stylesheet defaults stand. */
+    }
+  })()
+</script>
+
+<!-- Google Tag Manager -->
+<script>if(!window.__irhaasInternalPage){(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+})(window,document,'script','dataLayer','GTM-NVQM623J');}</script>
+<!-- End Google Tag Manager -->
+
+
+
+
+
+
+    <!-- GA/Ads are handled via GTM container to avoid duplicate gtag bootstrap -->
+
+    <!-- Defer non-critical third-party scripts to reduce early network/caching penalties -->
+    <script>
+      ;(function () {
+        var loaded = false
+
+        function appendScript(src, id) {
+          if (id && document.getElementById(id)) return document.getElementById(id)
+          var script = document.createElement("script")
+          script.async = true
+          script.src = src
+          if (id) script.id = id
+          document.head.appendChild(script)
+          return script
+        }
+
+        function loadThirdParty() {
+          if (loaded) return
+          if (window.__irhaasInternalPage) return
+          loaded = true
+
+       
+
+          // ClickCease
+          appendScript("https://www.clickcease.com/monitor/stat.js", "clickcease-script")
+
+          // Microsoft Clarity
+          ;(function (c, l, a, r, i, t, y) {
+            c[a] =
+              c[a] ||
+              function () {
+                ;(c[a].q = c[a].q || []).push(arguments)
+              }
+            t = l.createElement(r)
+            t.async = 1
+            t.src = "https://www.clarity.ms/tag/" + i
+            y = l.getElementsByTagName(r)[0]
+            y.parentNode.insertBefore(t, y)
+          })(window, document, "clarity", "script", "sxs3x2ruvu")
+
+          // Google Customer Reviews Merchant Widget
+          var merchantScript = appendScript(
+            "https://www.gstatic.com/shopping/merchant/merchantwidget.js",
+            "merchantWidgetScript"
+          )
+          merchantScript.addEventListener("load", function () {
+            if (window.merchantwidget && typeof window.merchantwidget.start === "function") {
+              window.merchantwidget.start({
+                merchant_id: 5694261680,
+                position: "RIGHT_BOTTOM",
+                region: "AE",
+              })
+            }
+          })
+        }
+
+        // Load third-party trackers/widgets only after real user interaction.
+        ;["pointerdown", "keydown", "touchstart", "scroll"].forEach(function (eventName) {
+          window.addEventListener(eventName, loadThirdParty, { once: true, passive: true })
+        })
+      })()
+    </script>
+    <!-- Meta Pixel Code -->
+    <script>
+      if (!window.__irhaasInternalPage) {
+      !function(f,b,e,v,n,t,s)
+      {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+      n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+      if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+      n.queue=[];t=b.createElement(e);t.async=!0;
+      t.src=v;s=b.getElementsByTagName(e)[0];
+      s.parentNode.insertBefore(t,s)}(window, document,'script',
+      'https://connect.facebook.net/en_US/fbevents.js');
+      fbq('init', '1074503198288217');
+      fbq('track', 'PageView');
+      }
+    </script>
+    <!-- End Meta Pixel Code -->
+  </head>
+  <body>
+
+<!-- Meta Pixel Code (noscript) -->
+<noscript><img height="1" width="1" style="display:none"
+src="https://www.facebook.com/tr?id=1074503198288217&ev=PageView&noscript=1"
+/></noscript>
+<!-- End Meta Pixel Code (noscript) -->
+
+
+
+<!-- Google Tag Manager (noscript) -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-NVQM623J"
+height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+<!-- End Google Tag Manager (noscript) -->
+
+
+
+
+
+    <!-- ClickCease noscript fallback -->
+    <noscript>
+      <a href="https://www.clickcease.com" rel="nofollow">
+        <img src="https://monitor.clickcease.com" alt="ClickCease" />
+      </a>
+    </noscript>
+
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+
+    <!-- GCR Language Code -->
+    <script>
+      window.___gcfg = { lang: "en" }
+    </script>
+  </body>
+</html>

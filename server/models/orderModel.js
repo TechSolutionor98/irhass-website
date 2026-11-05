@@ -1,0 +1,444 @@
+//
+
+// ===================
+
+import mongoose from "mongoose"
+
+const orderSchema = mongoose.Schema(
+  {
+    documentType: {
+      type: String,
+      enum: ["order", "quotation"],
+      default: "order",
+      index: true,
+    },
+    quotationStatus: {
+      type: String,
+      // "Hold" parks a document that is agreed but not ready to go to the
+      // warehouse. It stays on the Recent Quotation page until an admin
+      // releases it back to Draft or moves it into Orders.
+      enum: ["Draft", "Hold", "Converted"],
+      default: undefined,
+    },
+    // The VAT rate this document was priced at, as a percentage. Stored so the
+    // invoice can split every line at the same rate the admin set, instead of
+    // assuming the store default forever.
+    taxRate: {
+      type: Number,
+      default: undefined,
+    },
+    // Whether the printed document carries our bank details. Chosen per document on
+    // the Create Order/Quotation screen, because a cash sale should not advertise a
+    // transfer account.
+    showBankDetails: {
+      type: Boolean,
+      default: false,
+    },
+    // What the admin chose on the Create Order/Quotation screen. Everything
+    // raised there is staged as a quotation first; this records whether it was
+    // meant to become an order, so the list can label it and the admin knows
+    // which rows are waiting to be moved across.
+    stagedAs: {
+      type: String,
+      enum: ["order", "quotation"],
+      default: undefined,
+    },
+    convertedOrderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Order",
+      default: null,
+    },
+    convertedAt: {
+      type: Date,
+      default: null,
+    },
+    sourceQuotationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Order",
+      default: null,
+    },
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    orderSource: {
+      type: String,
+      enum: ["web", "app"],
+      default: "web",
+    },
+    orderItems: [
+      {
+        name: { type: String, required: true },
+        quantity: { type: Number, required: true },
+        image: { type: String, default: "/placeholder.svg" },
+        price: { type: Number, required: true },
+        // The price this line is measured against when showing a saving. Set only
+        // where the document has its own agreed price (admin-created orders and
+        // quotations), so the invoice does not fall back to the product's catalogue
+        // price and invent a discount that was never given.
+        basePrice: { type: Number },
+        product: {
+          type: mongoose.Schema.Types.ObjectId,
+          required: false, // Optional for protection items
+          ref: "Product",
+        },
+        // Color variation data
+        selectedColorIndex: { type: Number, default: null },
+        selectedColorData: {
+          color: { type: String },
+          image: { type: String },
+          price: { type: Number },
+          offerPrice: { type: Number },
+          sku: { type: String },
+        },
+        // DOS/Windows variation data
+        selectedDosIndex: { type: Number, default: null },
+        selectedDosData: {
+          dosType: { type: String },
+          image: { type: String },
+          price: { type: Number },
+          offerPrice: { type: Number },
+          sku: { type: String },
+        },
+        // Buyer protection fields
+        isProtection: { type: Boolean, default: false },
+        protectionFor: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Product",
+        },
+        protectionData: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "BuyerProtection",
+        },
+      },
+    ],
+    shippingAddress: {
+      name: { type: String },
+      email: { type: String },
+      phone: { type: String },
+      address: { type: String },
+      city: { type: String },
+      state: { type: String },
+      zipCode: { type: String },
+      country: { type: String },
+    },
+    billingAddress: {
+      name: { type: String },
+      email: { type: String },
+      phone: { type: String },
+      address: { type: String },
+      city: { type: String },
+      state: { type: String },
+      zipCode: { type: String },
+      country: { type: String },
+    },
+    currency: {
+      type: String,
+      default: "PKR",
+    },
+    currencySymbol: {
+      type: String,
+      default: "PKR",
+    },
+    deliveryType: {
+      type: String,
+      required: true,
+      enum: ["home", "pickup"],
+      default: "home",
+    },
+    pickupDetails: {
+      phone: { type: String },
+      location: { type: String },
+      storeId: { type: String },
+      // The branch address and number are copied onto the order rather than
+      // looked up later, so a collection order still reads correctly if the
+      // branch is renamed or closed. Without these on the schema Mongoose
+      // dropped them silently -- the storefront had been sending them all along.
+      storeAddress: { type: String },
+      storePhone: { type: String },
+      // The customer themselves. A collection has no shippingAddress, so without
+      // these the order has no record of who it is for.
+      name: { type: String },
+      email: { type: String },
+    },
+    paymentMethod: {
+      type: String,
+      required: true,
+      default: "Cash on Delivery",
+      enum: ["Cash on Delivery", "Credit Card", "Debit Card", "PayPal", "Bank Transfer", "cod", "card", "tabby", "tamara"],
+    },
+    // Store the actual payment provider used (tabby, tamara, card, cod)
+    actualPaymentMethod: {
+      type: String,
+      enum: ["cod", "card", "tabby", "tamara", null],
+      default: null,
+    },
+    paymentResult: {
+      id: String,
+      status: String,
+      update_time: String,
+      email_address: String,
+      // Provider-specific fields
+      tamara_order_id: String,
+      tamara_checkout_id: String,
+      tabby_payment_id: String,
+      ngenius_order_ref: String,
+      event_type: String,
+      authorized_amount: Object,
+      capture_id: String,
+      captured_amount: Object,
+      webhook_data: Object,
+    },
+    itemsPrice: {
+      type: Number,
+      required: true,
+      default: 0.0,
+    },
+    taxPrice: {
+      type: Number,
+      required: true,
+      default: 0.0,
+    },
+    shippingPrice: {
+      type: Number,
+      required: true,
+      default: 0.0,
+    },
+    discountAmount: {
+      type: Number,
+      default: 0.0,
+    },
+    codFee: {
+      type: Number,
+      default: 0.0,
+    },
+    codShippingFee: {
+      type: Number,
+      default: 0.0,
+    },
+    paymentCharges: [
+      {
+        name: { type: String },
+        amount: { type: Number }
+      }
+    ],
+    appDiscountApplied: {
+      type: Boolean,
+      default: false,
+    },
+    appDiscountId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "AppDiscount",
+      default: null,
+    },
+    appDiscountName: {
+      type: String,
+      default: "",
+    },
+    appDiscountType: {
+      type: String,
+      enum: ["percentage", "fixed", ""],
+      default: "",
+    },
+    appDiscountValue: {
+      type: Number,
+      default: 0,
+    },
+    appDiscountAmount: {
+      type: Number,
+      default: 0,
+    },
+    couponCode: {
+      type: String,
+    },
+
+    // ---- Loyalty ----
+    // Points spent on this order and the AED they took off the total. Debited from the
+    // customer at checkout, refunded if the order is cancelled or returned.
+    loyaltyPointsRedeemed: {
+      type: Number,
+      default: 0,
+    },
+    loyaltyDiscountAmount: {
+      type: Number,
+      default: 0,
+    },
+    // Points this order will pay out. Held pending until the order reaches the award
+    // status configured in LoyaltySettings, then confirmed.
+    loyaltyPointsEarned: {
+      type: Number,
+      default: 0,
+    },
+    loyaltyPointsAwarded: {
+      type: Boolean,
+      default: false,
+    },
+    loyaltyPointsAwardedAt: {
+      type: Date,
+      default: null,
+    },
+    // Set the moment a reversal is claimed. Reversing refunds the points spent and takes
+    // back the points earned, so it must happen exactly once however many times a
+    // cancelling status is applied.
+    loyaltyReversed: {
+      type: Boolean,
+      default: false,
+    },
+    loyaltyReversedAt: {
+      type: Date,
+      default: null,
+    },
+    // ---- Referral reward ----
+    // A single-use, user-locked discount from the referral programme. Marked spent at
+    // checkout and handed back if the order is cancelled before it ships.
+    referralRewardId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ReferralReward",
+      default: null,
+    },
+    // "referee" (welcome discount) or "referrer" (thank-you discount).
+    referralRewardRole: {
+      type: String,
+      enum: ["referee", "referrer", ""],
+      default: "",
+    },
+    referralDiscountType: {
+      type: String,
+      enum: ["percentage", "fixed", ""],
+      default: "",
+    },
+    referralDiscountValue: {
+      type: Number,
+      default: 0,
+    },
+    referralDiscountAmount: {
+      type: Number,
+      default: 0,
+    },
+    // Set the moment a referral reversal is claimed, so returning the reward happens
+    // exactly once however many times a cancelling status is applied.
+    referralRewardReturned: {
+      type: Boolean,
+      default: false,
+    },
+
+    totalPrice: {
+      type: Number,
+      required: true,
+      default: 0.0,
+    },
+    isPaid: {
+      type: Boolean,
+      required: true,
+      default: false,
+    },
+    paidAt: {
+      type: Date,
+    },
+    status: {
+      type: String,
+      required: true,
+      default: "New",
+      enum: [
+        "New",
+        "Processing",
+        "Confirmed",
+        "Ready for Shipment",
+        "Shipped",
+        "On the Way",
+        "Out for Delivery",
+        "Delivered",
+        "On Hold",
+        "Cancelled",
+        "Returned",
+        "Deleted",
+      ],
+    },
+    trackingId: {
+      type: String,
+    },
+    estimatedDelivery: {
+      type: Date,
+    },
+    deliveredAt: {
+      type: Date,
+    },
+    cancelReason: {
+      type: String,
+    },
+    notes: {
+      type: String,
+    },
+    customerNotes: {
+      type: String,
+      maxlength: 500,
+    },
+    sellerComments: {
+      type: String,
+    },
+    sellerMessage: {
+      type: String,
+      default: "",
+    },
+    // What the browser knew about this visitor at checkout, kept so the server
+    // can report the sale to Meta later -- a card order is only confirmed when
+    // the gateway calls back, long after the browser has gone.
+    metaAttribution: {
+      fbp: { type: String },
+      fbc: { type: String },
+      sourceUrl: { type: String },
+      userAgent: { type: String },
+      ip: { type: String },
+    },
+    // Set once the Conversions API has accepted the Purchase, so a retried
+    // webhook cannot report the same sale a second time.
+    metaPurchaseSentAt: {
+      type: Date,
+    },
+  },
+  {
+    timestamps: true,
+  },
+)
+
+orderSchema.post("init", function (doc) {
+  if (
+    (!doc.itemsPrice || doc.itemsPrice <= 0 || !doc.totalPrice || doc.totalPrice <= 0) &&
+    doc.orderItems &&
+    doc.orderItems.length > 0
+  ) {
+    let computedItemsPrice = 0
+    for (const item of doc.orderItems) {
+      computedItemsPrice += (Number(item.price) || 0) * (Number(item.quantity) || 1)
+    }
+
+    if (!doc.itemsPrice || doc.itemsPrice <= 0) {
+      doc.itemsPrice = computedItemsPrice
+    }
+
+    if (!doc.totalPrice || doc.totalPrice <= 0) {
+      const shipping = Number(doc.shippingPrice) || 0
+      const tax = Number(doc.taxPrice) || 0
+      const discount = Number(doc.discountAmount) || 0
+      const codFee = Number(doc.codFee) || 0
+      const codShipping = Number(doc.codShippingFee) || 0
+
+      const paymentChargesTotal = Array.isArray(doc.paymentCharges)
+        ? doc.paymentCharges.reduce((sum, charge) => sum + (Number(charge.amount) || 0), 0)
+        : 0
+
+      let computedTotal = computedItemsPrice + shipping + tax - discount
+      if (paymentChargesTotal > 0) {
+        computedTotal += paymentChargesTotal
+      } else {
+        computedTotal += codFee + codShipping
+      }
+
+      doc.totalPrice = Math.max(0, computedTotal)
+    }
+  }
+})
+
+const Order = mongoose.model("Order", orderSchema)
+
+export default Order

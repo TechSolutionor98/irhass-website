@@ -1,0 +1,5023 @@
+import express from "express"
+import asyncHandler from "express-async-handler"
+import axios from "axios"
+import Product from "../models/productModel.js"
+import StockMovement from "../models/stockMovementModel.js"
+import Category from "../models/categoryModel.js"
+import Brand from "../models/brandModel.js"
+import SubCategory from "../models/subCategoryModel.js"
+import { protect, admin } from "../middleware/authMiddleware.js"
+import { logActivity } from "../middleware/permissionMiddleware.js"
+import { cacheMiddleware, invalidateCache } from "../middleware/cacheMiddleware.js"
+import multer from "multer"
+import XLSX from "xlsx"
+import fs from "fs"
+import path from "path"
+import { fileURLToPath } from "url"
+import Tax from "../models/taxModel.js"
+import Unit from "../models/unitModel.js"
+import Color from "../models/colorModel.js"
+import Warranty from "../models/warrantyModel.js"
+import Size from "../models/sizeModel.js"
+import Volume from "../models/volumeModel.js"
+import mongoose from "mongoose"
+import { deleteLocalFile, isCloudinaryUrl } from "../config/multer.js"
+import { requireSeoUnlockIfBodyHas } from "../middleware/seoUnlockMiddleware.js"
+import { submitProduct } from "../services/indexNowService.js"
+import {
+  escapeRegex,
+  buildSearchConditions,
+  buildRelevanceExpression,
+} from "../utils/productSearch.js"
+
+const router = express.Router()
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+const TRANSLATION_TIMEOUT_MS = Number(process.env.TRANSLATION_TIMEOUT_MS || 4000)
+const BING_TRANSLATION_TIMEOUT_MS = Number(process.env.BING_TRANSLATION_TIMEOUT_MS || 3000)
+const TRANSLATION_FAILURE_COOLDOWN_MS = Number(process.env.TRANSLATION_FAILURE_COOLDOWN_MS || 60000)
+const ENABLE_PRODUCT_TRANSLATION = process.env.ENABLE_PRODUCT_TRANSLATION !== "false"
+const ENABLE_BING_TRANSLATION_FALLBACK = process.env.ENABLE_BING_TRANSLATION_FALLBACK !== "false"
+let cachedBingTranslate = null
+let bingLoaderAttempted = false
+let primaryTranslatorUnavailableUntil = 0
+let bingTranslatorUnavailableUntil = 0
+const PRODUCT_SEO_LOCK_FIELDS = [
+  "seoTitle",
+  "seoDescription",
+  "seoKeywords",
+  "seoCanonicalUrl",
+  "seoRobots",
+  "customSchema",
+  "ogTitle",
+  "ogDescription",
+  "ogImage",
+  // Defensive aliases
+  "metaTitle",
+  "metaDescription",
+  "canonicalUrl",
+  "schema",
+]
+
+const withTimeout = (promise, ms, timeoutMessage) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(timeoutMessage)), ms)
+    }),
+  ])
+
+const loadBingTranslate = async () => {
+  if (bingLoaderAttempted) return cachedBingTranslate
+  bingLoaderAttempted = true
+
+  try {
+    const bingModule = await import("bing-translate-api")
+    cachedBingTranslate = bingModule?.translate || null
+    if (!cachedBingTranslate) {
+      console.error("Product translation fallback unavailable: translate export not found")
+    }
+  } catch (error) {
+    console.error("Product translation fallback package not available:", error.message)
+    cachedBingTranslate = null
+  }
+
+  return cachedBingTranslate
+}
+
+// Helper for translation
+const translateText = async (text) => {
+  if (!ENABLE_PRODUCT_TRANSLATION) return ""
+  const normalizedText = String(text || "").trim()
+  if (!normalizedText) return ""
+
+  const now = Date.now()
+
+  if (now >= primaryTranslatorUnavailableUntil) {
+    try {
+      const response = await axios.post(
+        "https://langaimodel.irhaas.com/api/translate/en-ar",
+        { text: normalizedText },
+        { timeout: TRANSLATION_TIMEOUT_MS },
+      )
+      const translated = response.data.translation || ""
+      if (translated) return translated
+    } catch (error) {
+      primaryTranslatorUnavailableUntil = Date.now() + TRANSLATION_FAILURE_COOLDOWN_MS
+      console.error("Product primary translation failed, trying Bing fallback:", error.message)
+    }
+  }
+
+  if (!ENABLE_BING_TRANSLATION_FALLBACK) return ""
+  if (Date.now() < bingTranslatorUnavailableUntil) return ""
+
+  try {
+    const bingTranslate = await loadBingTranslate()
+    if (!bingTranslate) {
+      bingTranslatorUnavailableUntil = Date.now() + TRANSLATION_FAILURE_COOLDOWN_MS
+      return ""
+    }
+
+    const bingResult = await withTimeout(
+      bingTranslate(normalizedText, null, "ar"),
+      BING_TRANSLATION_TIMEOUT_MS,
+      "Bing product translation timeout",
+    )
+    return bingResult?.translation || ""
+  } catch (error) {
+    bingTranslatorUnavailableUntil = Date.now() + TRANSLATION_FAILURE_COOLDOWN_MS
+    console.error("Bing product translation fallback failed:", error.message)
+    return ""
+  }
+}
+
+// Multer setup for Excel parsing (use memory storage for Vercel compatibility)
+const excelUpload = multer({ storage: multer.memoryStorage() })
+const BULK_IMPORT_MAX_IMAGES = 200
+const PRODUCT_IMAGE_MIME_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"]
+const bulkImportUploadsDir = path.join(__dirname, "..", "uploads")
+const bulkImportExcelDir = path.join(bulkImportUploadsDir, "others")
+const bulkImportProductsDir = path.join(bulkImportUploadsDir, "products")
+
+for (const directory of [bulkImportUploadsDir, bulkImportExcelDir, bulkImportProductsDir]) {
+  if (!fs.existsSync(directory)) {
+    fs.mkdirSync(directory, { recursive: true })
+  }
+}
+
+const bulkImportStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    if (file.fieldname === "images") return cb(null, bulkImportProductsDir)
+    return cb(null, bulkImportExcelDir)
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`
+    const extension = (path.extname(file.originalname || "") || "").toLowerCase()
+    const safeBaseName = (path.basename(file.originalname || "upload", extension) || "upload").replace(/[^a-zA-Z0-9]/g, "_")
+
+    if (file.fieldname === "images") {
+      return cb(null, `product-${safeBaseName}-${uniqueSuffix}${extension || ".jpg"}`)
+    }
+
+    return cb(null, `bulk-products-${safeBaseName}-${uniqueSuffix}${extension || ".xlsx"}`)
+  },
+})
+
+const bulkImportFileFilter = (req, file, cb) => {
+  if (file.fieldname === "file") {
+    const extension = (path.extname(file.originalname || "") || "").toLowerCase()
+    if (extension === ".xlsx" || extension === ".xls") return cb(null, true)
+    return cb(new Error("Bulk import file must be .xlsx or .xls"), false)
+  }
+
+  if (file.fieldname === "images") {
+    if (PRODUCT_IMAGE_MIME_TYPES.includes(file.mimetype)) return cb(null, true)
+    return cb(new Error("Only image files (JPEG, PNG, GIF, WebP) are allowed for bulk product images"), false)
+  }
+
+  return cb(new Error(`Unexpected upload field: ${file.fieldname}`), false)
+}
+
+const bulkImportUpload = multer({
+  storage: bulkImportStorage,
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+    files: BULK_IMPORT_MAX_IMAGES + 1,
+  },
+  fileFilter: bulkImportFileFilter,
+})
+
+const handleBulkImportUpload = (req, res, next) => {
+  bulkImportUpload.fields([
+    { name: "file", maxCount: 1 },
+    { name: "images", maxCount: BULK_IMPORT_MAX_IMAGES },
+  ])(req, res, (err) => {
+    if (!err) return next()
+    if (err instanceof multer.MulterError) {
+      if (err.code === "LIMIT_UNEXPECTED_FILE") {
+        return res.status(400).json({
+          message: `You can upload up to ${BULK_IMPORT_MAX_IMAGES} product images at once.`,
+        })
+      }
+
+      if (err.code === "LIMIT_FILE_SIZE") {
+        return res.status(400).json({
+          message: "Each uploaded file must be 10MB or smaller.",
+        })
+      }
+    }
+
+    return res.status(400).json({
+      message: err.message || "Invalid bulk import upload request.",
+    })
+  })
+}
+
+// Helper: map Excel columns to backend keys (supports 4-level categories)
+const excelToBackendKey = {
+  name: "name",
+  slug: "slug",
+  sku: "sku",
+  image: "images",
+  images: "images",
+  gallery_images: "images",
+  galleryimages: "images",
+  // Category hierarchy
+  category: "category", // Level 1
+  subcategory: "category", // alias for level 1
+  sub_category: "category", // alias for level 1
+  category1: "category", // alias for level 1
+  category_level_1: "category", // alias for level 1
+  parent_category: "parent_category",
+  parentcategory: "parent_category",
+  // Deeper levels
+  category_level_2: "subCategory2",
+  category2: "subCategory2",
+  sub_category_2: "subCategory2",
+  subcategory2: "subCategory2",
+  subcategory2: "subCategory2",
+  category_level_3: "subCategory3",
+  category3: "subCategory3",
+  sub_category_3: "subCategory3",
+  subcategory3: "subCategory3",
+  subcategory3: "subCategory3",
+  category_level_4: "subCategory4",
+  category4: "subCategory4",
+  sub_category_4: "subCategory4",
+  subcategory4: "subCategory4",
+  subcategory4: "subCategory4",
+  barcode: "barcode",
+  buying_price: "buyingPrice",
+  wholesale_price: "wholesalePrice",
+  wholesaleprice: "wholesalePrice",
+  selling_price: "price",
+  offer_price: "offerPrice",
+  price: "price",
+  offerprice: "offerPrice",
+  tax: "tax",
+  brand: "brand",
+  status: "stockStatus",
+  stockstatus: "stockStatus",
+  show_stock_out: "showStockOut",
+  can_purchasable: "canPurchase",
+  refundable: "refundable",
+  max_purchase_quantity: "maxPurchaseQty",
+  low_stock_warning: "lowStockWarning",
+  unit: "unit",
+  weight: "weight",
+  tags: "tags",
+  description: "description",
+  discount: "discount",
+  specifications: "specifications",
+  details: "details",
+  short_description: "shortDescription",
+  warranty: "warranty",
+  size: "size",
+  volume: "volume",
+}
+
+function remapRow(row) {
+  const mapped = {}
+  const specifications = []
+  for (const key in row) {
+    const normalizedKey = key.trim().toLowerCase()
+    const backendKey = excelToBackendKey[normalizedKey] || key.trim()
+    if (excelToBackendKey[normalizedKey]) {
+      mapped[backendKey] = row[key]
+    } else {
+      // If not a standard field, treat as specification
+      if (row[key] !== undefined && row[key] !== "") {
+        specifications.push({ key: key.trim(), value: String(row[key]) })
+      }
+    }
+  }
+  if (specifications.length > 0) {
+    mapped.specifications = specifications
+  }
+  return mapped
+}
+
+const SPECIFICATIONS_FALLBACK_KEY = "Specifications"
+
+const parseSpecificationSegment = (segment) => {
+  const raw = String(segment || "").trim()
+  if (!raw) return null
+
+  const colonIndex = raw.indexOf(":")
+  if (colonIndex > 0) {
+    const key = raw.slice(0, colonIndex).trim()
+    const value = raw.slice(colonIndex + 1).trim()
+    if (key && value) return { key, value }
+  }
+
+  const pipeIndex = raw.indexOf("|")
+  if (pipeIndex > 0) {
+    const key = raw.slice(0, pipeIndex).trim()
+    const value = raw.slice(pipeIndex + 1).trim()
+    if (key && value) return { key, value }
+  }
+
+  return { key: SPECIFICATIONS_FALLBACK_KEY, value: raw }
+}
+
+const parseDelimitedSpecs = (raw) => {
+  const text = String(raw || "").replace(/\r\n/g, "\n").trim()
+  if (!text) return []
+
+  const tokens = text
+    .split(/[,;\n|]+/)
+    .map((token) => token.trim())
+    .filter(Boolean)
+
+  if (tokens.length === 0) return []
+
+  const parsed = []
+  for (const token of tokens) {
+    const colonIndex = token.indexOf(":")
+    const pipeIndex = token.indexOf("|")
+    if (colonIndex > 0 || pipeIndex > 0) {
+      const segment = parseSpecificationSegment(token)
+      if (segment) parsed.push(segment)
+      continue
+    }
+
+    // Continuation chunk: keep comma-separated text inside the previous spec value.
+    if (parsed.length > 0) {
+      parsed[parsed.length - 1].value = `${parsed[parsed.length - 1].value}, ${token}`.trim()
+    }
+  }
+
+  return parsed
+}
+
+const parseCommaSeparatedSpecs = (raw) => {
+  const text = String(raw || "").trim()
+  if (!text) return []
+
+  const keyPattern = /([A-Za-z][A-Za-z0-9 _\-\/()&.+#]{0,60})\s*:/g
+  const matches = []
+  let match
+
+  while ((match = keyPattern.exec(text)) !== null) {
+    matches.push({
+      key: String(match[1] || "").trim(),
+      valueStart: keyPattern.lastIndex,
+      matchStart: match.index,
+    })
+  }
+
+  if (matches.length < 2) return []
+
+  const parsed = []
+  for (let i = 0; i < matches.length; i++) {
+    const current = matches[i]
+    const next = matches[i + 1]
+    const valueEnd = next ? next.matchStart : text.length
+    const value = text
+      .slice(current.valueStart, valueEnd)
+      .replace(/^[\s,;|]+|[\s,;|]+$/g, "")
+      .trim()
+
+    if (current.key && value) {
+      parsed.push({ key: current.key, value })
+    }
+  }
+
+  return parsed
+}
+
+function parseSpecificationsInput(input) {
+  if (input === undefined || input === null) return []
+
+  if (Array.isArray(input)) {
+    const parsed = []
+    for (const item of input) {
+      if (item && typeof item === "object" && !Array.isArray(item)) {
+        const key = String(item.key || "").trim()
+        const value = String(item.value || "").trim()
+        if (key && value) parsed.push({ key, value })
+      } else {
+        parsed.push(...parseSpecificationsInput(item))
+      }
+    }
+    return parsed
+  }
+
+  if (typeof input === "object") {
+    const key = String(input.key || "").trim()
+    const value = String(input.value || "").trim()
+    return key && value ? [{ key, value }] : []
+  }
+
+  const raw = String(input).replace(/\r\n/g, "\n").trim()
+  if (!raw) return []
+
+  // Preferred format: Key: Value, Key: Value (also supports ';', '|', or one per line)
+  if (/[,\n;|]/.test(raw)) {
+    const delimiterParsed = parseDelimitedSpecs(raw)
+    if (delimiterParsed.length > 0) return delimiterParsed
+  }
+
+  // Legacy free-form fallback parser.
+  const commaParsed = parseCommaSeparatedSpecs(raw)
+  if (commaParsed.length > 0) return commaParsed
+
+  const single = parseSpecificationSegment(raw)
+  return single ? [single] : []
+}
+
+// Robust slug generator: lowercases, converts & to 'and', removes quotes, replaces non-alphanumerics with '-',
+// collapses multiple dashes, and trims leading/trailing dashes.
+function generateSlug(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/&/g, "-and-")
+    .replace(/["'’`]+/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+}
+
+const sanitizeSlug = (slug) => generateSlug(slug)
+const normalizeOptionalUniqueField = (value) => {
+  const normalized = String(value ?? "").trim()
+  return normalized !== "" ? normalized : undefined
+}
+
+const buildCategorySnapshotFromDocs = ({
+  parentCategoryDoc = null,
+  level1SubCategoryDoc = null,
+  level2SubCategoryDoc = null,
+  level3SubCategoryDoc = null,
+  level4SubCategoryDoc = null,
+} = {}) => ({
+  parentCategoryName: parentCategoryDoc?.name || "",
+  parentCategorySlug: parentCategoryDoc?.slug || "",
+  categoryName: level1SubCategoryDoc?.name || "",
+  categorySlug: level1SubCategoryDoc?.slug || "",
+  subCategory2Name: level2SubCategoryDoc?.name || "",
+  subCategory2Slug: level2SubCategoryDoc?.slug || "",
+  subCategory3Name: level3SubCategoryDoc?.name || "",
+  subCategory3Slug: level3SubCategoryDoc?.slug || "",
+  subCategory4Name: level4SubCategoryDoc?.name || "",
+  subCategory4Slug: level4SubCategoryDoc?.slug || "",
+})
+
+const normalizeLookupValue = (value) =>
+  String(value || "")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+
+const normalizeHierarchyLabel = (value) => normalizeLookupValue(value).toLowerCase()
+
+const coerceCategoryHierarchy = (level2Name, level3Name, level4Name) => {
+  let lvl2 = normalizeLookupValue(level2Name)
+  let lvl3 = normalizeLookupValue(level3Name)
+  let lvl4 = normalizeLookupValue(level4Name)
+
+  // Keep sheet hierarchy strict: do not shift values across levels automatically.
+  // If level2 is empty and level3/4 has values, they stay at their own level.
+
+  // Drop repeated values across adjacent levels (same label mistakenly copied down).
+  if (lvl2 && lvl3 && normalizeHierarchyLabel(lvl2) === normalizeHierarchyLabel(lvl3)) {
+    lvl3 = ""
+  }
+  if (lvl3 && lvl4 && normalizeHierarchyLabel(lvl3) === normalizeHierarchyLabel(lvl4)) {
+    lvl4 = ""
+  }
+  if (lvl2 && lvl4 && normalizeHierarchyLabel(lvl2) === normalizeHierarchyLabel(lvl4)) {
+    lvl4 = ""
+  }
+
+  return { level2Name: lvl2, level3Name: lvl3, level4Name: lvl4 }
+}
+
+const normalizeFieldKey = (key) =>
+  String(key || "")
+    .replace(/^\uFEFF/, "")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+
+/**
+ * An optional money column from an import row.
+ *
+ * Blank, missing or unparseable becomes null -- "no wholesale price set" --
+ * rather than 0, so importing a sheet that has no wholesale column cannot
+ * silently stamp every product with a zero wholesale price. A real 0 typed in
+ * the sheet is kept as 0.
+ */
+const parseOptionalPrice = (value) => {
+  if (value === undefined || value === null) return null
+  const text = String(value).trim()
+  if (text === "") return null
+  const parsed = Number.parseFloat(text)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const getBulkField = (row, keys) => {
+  if (!row || typeof row !== "object") return undefined
+
+  const normalizedRow = new Map()
+  for (const [rawKey, rawValue] of Object.entries(row)) {
+    const normalized = normalizeFieldKey(rawKey)
+    if (normalized && !normalizedRow.has(normalized)) normalizedRow.set(normalized, rawValue)
+  }
+
+  for (const key of keys) {
+    const normalizedKey = normalizeFieldKey(key)
+    if (!normalizedKey || !normalizedRow.has(normalizedKey)) continue
+
+    const rawValue = normalizedRow.get(normalizedKey)
+    if (rawValue === undefined || rawValue === null) continue
+
+    const cleaned = normalizeLookupValue(rawValue)
+    if (cleaned !== "") return cleaned
+  }
+
+  return undefined
+}
+
+const normalizeImageValue = (value) => {
+  if (value === undefined || value === null) return ""
+  if (typeof value === "string") return value.trim()
+  if (typeof value === "object") {
+    const candidate = value.url || value.path || value.src || ""
+    return candidate ? String(candidate).trim() : ""
+  }
+  return ""
+}
+
+const normalizeImageArray = (value) => {
+  const seen = new Set()
+  const output = []
+
+  ;(Array.isArray(value) ? value : [value]).forEach((item) => {
+    const normalized = normalizeImageValue(item)
+    if (!normalized || seen.has(normalized)) return
+    seen.add(normalized)
+    output.push(normalized)
+  })
+
+  return output
+}
+
+const normalizeNestedVariationImages = (variations) => {
+  if (!Array.isArray(variations)) return variations
+
+  return variations.map((variation) => {
+    if (!variation || typeof variation !== "object") return variation
+    return {
+      ...variation,
+      image: normalizeImageValue(variation.image),
+      galleryImages: normalizeImageArray(variation.galleryImages),
+    }
+  })
+}
+
+const normalizeProductMediaPayload = (payload) => {
+  if (!payload || typeof payload !== "object") return payload
+
+  if (Object.prototype.hasOwnProperty.call(payload, "image")) {
+    payload.image = normalizeImageValue(payload.image)
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "galleryImages")) {
+    payload.galleryImages = normalizeImageArray(payload.galleryImages)
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "ogImage")) {
+    payload.ogImage = normalizeImageValue(payload.ogImage)
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "colorVariations")) {
+    payload.colorVariations = normalizeNestedVariationImages(payload.colorVariations)
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "dosVariations")) {
+    payload.dosVariations = normalizeNestedVariationImages(payload.dosVariations)
+  }
+
+  return payload
+}
+
+const toUploadUrl = (absolutePath) => {
+  const normalized = String(absolutePath || "").replace(/\\/g, "/")
+  const marker = "/uploads/"
+  const markerIndex = normalized.indexOf(marker)
+
+  if (markerIndex >= 0) {
+    return normalized.slice(markerIndex)
+  }
+
+  const fallbackRelative = path.relative(bulkImportUploadsDir, absolutePath).replace(/\\/g, "/")
+  return `/uploads/${fallbackRelative}`
+}
+
+const normalizeImageNameForLookup = (value) => {
+  const normalized = normalizeLookupValue(value)
+  if (!normalized) return ""
+  const fileNameOnly = normalized.replace(/\\/g, "/").split("/").pop() || ""
+  return fileNameOnly.toLowerCase()
+}
+
+const imageNameWithoutExtension = (value) => {
+  const normalizedName = normalizeImageNameForLookup(value)
+  if (!normalizedName) return ""
+  return normalizedName.replace(/\.[a-z0-9]+$/i, "")
+}
+
+const buildImageLookupKeys = (value) => {
+  const withExt = normalizeImageNameForLookup(value)
+  const withoutExt = imageNameWithoutExtension(value)
+  const keys = []
+
+  if (withExt) keys.push(withExt)
+  if (withoutExt && withoutExt !== withExt) keys.push(withoutExt)
+
+  return keys
+}
+
+const parseImageNameList = (rawValue) => {
+  if (rawValue === undefined || rawValue === null) return []
+
+  return String(rawValue)
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean)
+}
+
+const buildCaseInsensitiveExactRegex = (value) => {
+  const normalized = normalizeLookupValue(value)
+  if (!normalized) return null
+  return new RegExp(`^${escapeRegex(normalized)}$`, "i")
+}
+
+function normalizeAdminStockStatus(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[-\s]+/g, " ")
+
+  if (normalized === "in stock" || normalized === "instock") return "In Stock"
+  if (normalized === "out of stock" || normalized === "outofstock") return "Out of Stock"
+  if (normalized === "preorder" || normalized === "pre order") return "PreOrder"
+  return null
+}
+
+function buildAdminStockStatusMatcher(normalizedStockStatus) {
+  if (normalizedStockStatus === "In Stock") return /^in\s*-?\s*stock$/i
+  if (normalizedStockStatus === "Out of Stock") return /^out\s*-?\s*of\s*-?\s*stock$/i
+  if (normalizedStockStatus === "PreOrder") return /^pre\s*-?\s*order$/i
+  return null
+}
+
+function buildAdminStockStatusQuery(normalizedStockStatus) {
+  if (!normalizedStockStatus) return null
+
+  if (normalizedStockStatus === "In Stock") {
+    return {
+      $or: [
+        { stockStatus: /^in\s*-?\s*stock$/i },
+        { stockStatus: /^available(\s*product)?$/i },
+        { stockStatus: { $exists: false }, countInStock: { $gt: 0 } },
+        { stockStatus: null, countInStock: { $gt: 0 } },
+        { stockStatus: "", countInStock: { $gt: 0 } },
+      ],
+    }
+  }
+
+  if (normalizedStockStatus === "Out of Stock") {
+    return {
+      $or: [
+        { stockStatus: /^out\s*-?\s*of\s*-?\s*stock$/i },
+        { stockStatus: /^stock\s*out$/i },
+        { stockStatus: { $exists: false }, countInStock: { $lte: 0 } },
+        { stockStatus: null, countInStock: { $lte: 0 } },
+        { stockStatus: "", countInStock: { $lte: 0 } },
+      ],
+    }
+  }
+
+  if (normalizedStockStatus === "PreOrder") {
+    return {
+      $or: [{ stockStatus: /^pre\s*-?\s*order$/i }],
+    }
+  }
+
+  const fallbackMatcher = buildAdminStockStatusMatcher(normalizedStockStatus)
+  if (!fallbackMatcher) return null
+  return { $or: [{ stockStatus: fallbackMatcher }] }
+}
+
+function resolveAdminStockStatusFromQuery(query = {}) {
+  const rawValue =
+    query.stockStatus ??
+    query.stockstatus ??
+    query.status ??
+    query.stock_status
+
+  if (rawValue === undefined || rawValue === null) return null
+  const normalized = normalizeAdminStockStatus(rawValue)
+  return normalized || null
+}
+
+const toArrayParam = (value) => {
+  if (Array.isArray(value)) return value
+  if (typeof value === "string" && value.trim()) {
+    if (value.includes(",")) {
+      return value
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    }
+    return [value.trim()]
+  }
+  return []
+}
+
+const collectQueryValues = (query = {}, keys = []) => {
+  const values = []
+  keys.forEach((key) => {
+    values.push(...toArrayParam(query[key]))
+  })
+  return Array.from(new Set(values.map((value) => String(value).trim()).filter(Boolean)))
+}
+
+const parseObjectIdArrayFromQuery = (query = {}, keys = []) =>
+  collectQueryValues(query, keys).filter((value) => mongoose.Types.ObjectId.isValid(value))
+
+const parseFiniteNumber = (value) => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+// An explicit stockStatus is what the product card shows the shopper, so it decides here
+// too; countInStock only speaks for products whose status says nothing either way. Listed
+// once so the "in stock" and "out of stock" filters cannot drift apart.
+const IN_STOCK_STATUS_PATTERNS = [/^in\s*-?\s*stock$/i, /^available(\s*product)?$/i, /^pre\s*-?\s*order$/i]
+const OUT_OF_STOCK_STATUS_PATTERNS = [/^out\s*-?\s*of\s*-?\s*stock$/i, /^stock\s*out$/i]
+
+const buildPublicStockFilterCondition = (stockStatuses = []) => {
+  if (!Array.isArray(stockStatuses) || stockStatuses.length === 0) return null
+
+  const hasInStock = stockStatuses.includes("inStock")
+  const hasOutOfStock = stockStatuses.includes("outOfStock")
+  const hasOnSale = stockStatuses.includes("onSale")
+  const orConditions = []
+
+  if (hasInStock) {
+    orConditions.push({
+      $or: [
+        ...IN_STOCK_STATUS_PATTERNS.map((pattern) => ({ stockStatus: pattern })),
+        // A product the admin marked out of stock stays out of stock, whatever the count says.
+        {
+          $and: [{ stockStatus: { $nin: OUT_OF_STOCK_STATUS_PATTERNS } }, { countInStock: { $gt: 0 } }],
+        },
+      ],
+    })
+  }
+
+  if (hasOutOfStock) {
+    orConditions.push({
+      $or: [
+        ...OUT_OF_STOCK_STATUS_PATTERNS.map((pattern) => ({ stockStatus: pattern })),
+        {
+          $and: [{ stockStatus: { $nin: IN_STOCK_STATUS_PATTERNS } }, { countInStock: { $lte: 0 } }],
+        },
+      ],
+    })
+  }
+
+  if (hasOnSale) {
+    orConditions.push({
+      $or: [
+        { discount: { $gt: 0 } },
+        { $expr: { $and: [{ $gt: ["$offerPrice", 0] }, { $lt: ["$offerPrice", "$price"] }] } },
+      ],
+    })
+  }
+
+  if (orConditions.length === 0) return null
+  if (orConditions.length === 1) return orConditions[0]
+  return { $or: orConditions }
+}
+
+// @desc    Fetch all products (Admin only - includes inactive)
+// @route   GET /api/products/admin
+// @access  Private/Admin
+router.get("/admin", protect, admin, async (req, res) => {
+  try {
+    const { search, category, subcategory, subCategory2, subCategory3, subCategory4, parentCategory, brand, isActive, onHold, limit = 20, page = 1 } = req.query
+    const query = {}
+    const andConditions = []
+    const orConditions = []
+
+    if (category) query.category = category
+    if (subcategory) query.subCategory = subcategory
+    if (subCategory2) query.subCategory2 = subCategory2
+    if (subCategory3) query.subCategory3 = subCategory3
+    if (subCategory4) query.subCategory4 = subCategory4
+    if (parentCategory) query.parentCategory = parentCategory
+    if (brand) query.brand = brand
+
+    // Add isActive filter if provided
+    if (isActive !== undefined && isActive !== null && isActive !== "") {
+      query.isActive = isActive === "true" || isActive === true
+    }
+
+    // Add onHold filter if provided
+    if (onHold !== undefined && onHold !== null && onHold !== "") {
+      query.onHold = onHold === "true" || onHold === true
+    }
+
+    // Add stock status filter if provided
+    const normalizedStockStatus = resolveAdminStockStatusFromQuery(req.query)
+    if (normalizedStockStatus) {
+      const stockStatusCondition = buildAdminStockStatusQuery(normalizedStockStatus)
+      if (stockStatusCondition) andConditions.push(stockStatusCondition)
+    }
+
+    if (typeof search === "string" && search.trim() !== "") {
+      // Admin search stays broad: the back office does look products up by spec text.
+      const searchCondition = await buildSearchConditions(search, Brand, { includeDescription: true })
+      if (searchCondition) andConditions.push(searchCondition)
+    }
+
+    const finalQuery = andConditions.length > 0 ? { ...query, $and: andConditions } : query
+
+    // Get total count for pagination
+    const totalCount = await Product.countDocuments(finalQuery)
+
+    let productsQuery = Product.find(finalQuery)
+      .populate("brand", "name nameAr slug")
+      .populate("series", "name optionType")
+      .populate("model", "name optionType")
+      .populate("make", "name optionType")
+      .populate("manufacturer", "name optionType")
+      .populate("soldBy", "name optionType")
+      .populate("category", "name nameAr slug")
+      .populate("subCategory", "name nameAr slug")
+      .populate("parentCategory", "name nameAr slug")
+      .populate("subCategory2", "name nameAr slug")
+      .populate("subCategory3", "name nameAr slug")
+      .populate("subCategory4", "name nameAr slug")
+      .populate("tax", "rate")
+      .populate({
+        path: "variations.product",
+        select: "name nameAr slug image price offerPrice sku selfVariationText selfVariationTextAr reverseVariationText reverseVariationTextAr"
+      })
+      .populate({
+        path: "availableModels.product",
+        select: "name nameAr slug image price offerPrice sku selfAvailableModelText selfAvailableModelTextAr"
+      })
+      .sort({ createdAt: -1 })
+
+    // Pagination
+    const skip = (page - 1) * limit
+    productsQuery = productsQuery.skip(skip).limit(Number.parseInt(limit))
+
+    const products = await productsQuery
+    res.json({ products, totalCount })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ message: "Server error" })
+  }
+})
+
+// @desc    Get product count only (Admin only - for efficient select all)
+// @route   GET /api/products/admin/count
+// @access  Private/Admin
+router.get("/admin/count", protect, admin, async (req, res) => {
+  try {
+    const { search, category, subcategory, subCategory2, subCategory3, subCategory4, parentCategory, brand, isActive, onHold } = req.query
+    const query = {}
+    const andConditions = []
+    const orConditions = []
+
+    if (category) query.category = category
+    if (subcategory) query.subCategory = subcategory
+    if (subCategory2) query.subCategory2 = subCategory2
+    if (subCategory3) query.subCategory3 = subCategory3
+    if (subCategory4) query.subCategory4 = subCategory4
+    if (parentCategory) query.parentCategory = parentCategory
+    if (brand) query.brand = brand
+
+    // Add isActive filter if provided
+    if (isActive !== undefined && isActive !== null && isActive !== "") {
+      query.isActive = isActive === "true" || isActive === true
+    }
+
+    // Add onHold filter if provided
+    if (onHold !== undefined && onHold !== null && onHold !== "") {
+      query.onHold = onHold === "true" || onHold === true
+    }
+
+    // Add stock status filter if provided
+    const normalizedStockStatus = resolveAdminStockStatusFromQuery(req.query)
+    if (normalizedStockStatus) {
+      const stockStatusCondition = buildAdminStockStatusQuery(normalizedStockStatus)
+      if (stockStatusCondition) andConditions.push(stockStatusCondition)
+    }
+
+    if (typeof search === "string" && search.trim() !== "") {
+      // Admin search stays broad: the back office does look products up by spec text.
+      const searchCondition = await buildSearchConditions(search, Brand, { includeDescription: true })
+      if (searchCondition) andConditions.push(searchCondition)
+    }
+
+    const finalQuery = andConditions.length > 0 ? { ...query, $and: andConditions } : query
+
+    // Get only the count - much faster than fetching products
+    const totalCount = await Product.countDocuments(finalQuery)
+    res.json({ totalCount })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ message: "Server error" })
+  }
+})
+
+// The stock figure an inventory line is judged by. Shared between the filter
+// and the summary so a product cannot be counted as low stock in the totals
+// while the "Low stock" filter refuses to show it.
+const LOW_STOCK_FALLBACK = 5
+const stockOf = "$countInStock"
+const lowStockLimit = { $ifNull: ["$lowStockWarning", LOW_STOCK_FALLBACK] }
+
+// The price a unit would actually sell for today: the offer when one is set,
+// otherwise the list price. Stock value has to use this or the figure is not
+// the money on the shelf.
+const sellingPriceExpr = {
+  $cond: [{ $gt: [{ $ifNull: ["$offerPrice", 0] }, 0] }, "$offerPrice", { $ifNull: ["$price", 0] }],
+}
+
+// An id filter has to be a real ObjectId here, not the string the browser sent.
+// `find` casts a string against the schema and matches; `$match` inside an
+// aggregation does not, and compares a string to an ObjectId that can never
+// equal it. Casting once up front keeps the count, the page and the totals
+// describing the same set -- otherwise picking a category fills the table and
+// zeroes every figure above it.
+const asObjectId = (value) =>
+  mongoose.Types.ObjectId.isValid(value) ? new mongoose.Types.ObjectId(String(value)) : null
+
+const buildInventoryStockCondition = (stock) => {
+  if (stock === "in") return { countInStock: { $gt: 0 } }
+  if (stock === "out") return { countInStock: { $lte: 0 } }
+  if (stock === "low") {
+    return { $expr: { $and: [{ $gt: [stockOf, 0] }, { $lte: [stockOf, lowStockLimit] }] } }
+  }
+  return null
+}
+
+const buildInventoryPricingCondition = (pricing) => {
+  if (pricing === "offer") return { offerPrice: { $gt: 0 } }
+  if (pricing === "no-offer") return { $or: [{ offerPrice: { $lte: 0 } }, { offerPrice: null }, { offerPrice: { $exists: false } }] }
+  if (pricing === "wholesale") return { wholesalePrice: { $gt: 0 } }
+  // A wholesale price of null means "never set", which is the gap worth finding.
+  if (pricing === "no-wholesale") return { $or: [{ wholesalePrice: null }, { wholesalePrice: { $exists: false } }, { wholesalePrice: { $lte: 0 } }] }
+  return null
+}
+
+const INVENTORY_SORTS = {
+  newest: { createdAt: -1 },
+  name: { name: 1 },
+  "stock-asc": { countInStock: 1 },
+  "stock-desc": { countInStock: -1 },
+  "price-asc": { price: 1 },
+  "price-desc": { price: -1 },
+}
+
+// @desc    Stock and pricing for every product, with the totals for the filter
+// @route   GET /api/products/admin/inventory
+// @access  Private/Admin
+//
+// Separate from GET /admin because the two want different things. That route
+// populates a dozen references including nested variation products, which is
+// wasted work for a stock list; this one reads a lean projection and, more
+// importantly, returns the summary across the *whole* filtered set rather than
+// the page on screen -- a stock value that only counted the visible twenty
+// would be worse than showing none at all.
+router.get("/admin/inventory", protect, admin, async (req, res) => {
+  try {
+    const {
+      search,
+      parentCategory,
+      category,
+      subCategory2,
+      subCategory3,
+      subCategory4,
+      brand,
+      stock = "all",
+      pricing = "all",
+      minPrice,
+      maxPrice,
+      sort = "newest",
+      limit = 25,
+      page = 1,
+    } = req.query
+
+    const query = {}
+    const andConditions = []
+
+    // A malformed id is a bug in the caller, not a request to show everything,
+    // so it narrows to nothing rather than being quietly dropped.
+    for (const [field, value] of [
+      ["parentCategory", parentCategory],
+      ["category", category],
+      ["subCategory2", subCategory2],
+      ["subCategory3", subCategory3],
+      ["subCategory4", subCategory4],
+      ["brand", brand],
+    ]) {
+      if (!value) continue
+      const id = asObjectId(value)
+      if (id) query[field] = id
+      else andConditions.push({ _id: null })
+    }
+
+    const stockCondition = buildInventoryStockCondition(String(stock))
+    if (stockCondition) andConditions.push(stockCondition)
+
+    const pricingCondition = buildInventoryPricingCondition(String(pricing))
+    if (pricingCondition) andConditions.push(pricingCondition)
+
+    const min = Number.parseFloat(minPrice)
+    const max = Number.parseFloat(maxPrice)
+    if (Number.isFinite(min) || Number.isFinite(max)) {
+      const range = {}
+      if (Number.isFinite(min)) range.$gte = min
+      if (Number.isFinite(max)) range.$lte = max
+      andConditions.push({ price: range })
+    }
+
+    if (typeof search === "string" && search.trim() !== "") {
+      // Narrower than the product list on purpose: stock is looked up by name or
+      // code, and matching description text here only buries the row wanted.
+      const term = search.trim()
+      const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      const pattern = new RegExp(escaped, "i")
+      andConditions.push({ $or: [{ name: pattern }, { sku: pattern }, { barcode: pattern }, { gtin: pattern }] })
+    }
+
+    const finalQuery = andConditions.length > 0 ? { ...query, $and: andConditions } : query
+
+    const perPage = Math.min(Math.max(Number.parseInt(limit, 10) || 25, 1), 200)
+    const currentPage = Math.max(Number.parseInt(page, 10) || 1, 1)
+
+    const [totalCount, products, summaryRows] = await Promise.all([
+      Product.countDocuments(finalQuery),
+      Product.find(finalQuery)
+        .select(
+          "name sku barcode gtin image price offerPrice wholesalePrice oldPrice discount countInStock lowStockWarning stockStatus isActive onHold updatedAt",
+        )
+        .populate("brand", "name")
+        .populate("parentCategory", "name")
+        .populate("category", "name")
+        .sort(INVENTORY_SORTS[sort] || INVENTORY_SORTS.newest)
+        .skip((currentPage - 1) * perPage)
+        .limit(perPage)
+        .lean(),
+      Product.aggregate([
+        { $match: finalQuery },
+        {
+          $group: {
+            _id: null,
+            skus: { $sum: 1 },
+            units: { $sum: { $ifNull: [stockOf, 0] } },
+            retailValue: { $sum: { $multiply: [{ $ifNull: [stockOf, 0] }, { $ifNull: ["$price", 0] }] } },
+            sellingValue: { $sum: { $multiply: [{ $ifNull: [stockOf, 0] }, sellingPriceExpr] } },
+            wholesaleValue: {
+              $sum: { $multiply: [{ $ifNull: [stockOf, 0] }, { $ifNull: ["$wholesalePrice", 0] }] },
+            },
+            outOfStock: { $sum: { $cond: [{ $lte: [{ $ifNull: [stockOf, 0] }, 0] }, 1, 0] } },
+            lowStock: {
+              $sum: {
+                $cond: [
+                  { $and: [{ $gt: [{ $ifNull: [stockOf, 0] }, 0] }, { $lte: [{ $ifNull: [stockOf, 0] }, lowStockLimit] }] },
+                  1,
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      ]),
+    ])
+
+    const empty = { skus: 0, units: 0, retailValue: 0, sellingValue: 0, wholesaleValue: 0, outOfStock: 0, lowStock: 0 }
+    const { _id, ...summary } = summaryRows[0] || empty
+
+    // Movement totals for the in / out / damage columns. Looked up only for the rows
+    // on screen rather than the whole catalogue -- the totals above are deliberately
+    // across the filtered set, but these are per row.
+    const movementTotals = await StockMovement.totalsByProduct(products.map((p) => p._id))
+    const productsWithMovements = products.map((product) => ({
+      ...product,
+      movements: movementTotals[String(product._id)] || { in: 0, out: 0, damage: 0 },
+    }))
+
+    res.json({
+      products: productsWithMovements,
+      totalCount,
+      page: currentPage,
+      pages: Math.max(1, Math.ceil(totalCount / perPage)),
+      summary,
+    })
+  } catch (error) {
+    console.error("Inventory query failed:", error)
+    res.status(500).json({ message: "Server error" })
+  }
+})
+
+// @desc    Get products by specific IDs (for exporting selected products)
+// @route   POST /api/products/by-ids
+// @access  Private/Admin
+router.post("/by-ids", protect, admin, asyncHandler(async (req, res) => {
+  try {
+    const { ids } = req.body
+    
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ message: "Product IDs array is required" })
+    }
+
+    // Validate ObjectIds
+    const validIds = ids.filter(id => mongoose.Types.ObjectId.isValid(id))
+    
+    if (validIds.length === 0) {
+      return res.status(400).json({ message: "No valid product IDs provided" })
+    }
+
+    // Fetch products by IDs
+    const products = await Product.find({ _id: { $in: validIds } })
+      .populate("brand", "name nameAr slug")
+      .populate("series", "name optionType")
+      .populate("model", "name optionType")
+      .populate("make", "name optionType")
+      .populate("manufacturer", "name optionType")
+      .populate("soldBy", "name optionType")
+      .populate("category", "name nameAr slug")
+      .populate("subCategory", "name nameAr slug")
+      .populate("parentCategory", "name nameAr slug")
+      .populate("subCategory2", "name nameAr slug")
+      .populate("subCategory3", "name nameAr slug")
+      .populate("subCategory4", "name nameAr slug")
+      .populate("tax", "rate")
+      .sort({ createdAt: -1 })
+
+    res.json({ 
+      products,
+      totalCount: products.length,
+      requestedCount: ids.length,
+      foundCount: products.length
+    })
+  } catch (error) {
+    console.error("Error fetching products by IDs:", error)
+    res.status(500).json({ message: "Server error" })
+  }
+}))
+
+// @desc    Fetch all products
+// @route   GET /api/products
+// @access  Public
+router.get(
+  "/",
+  cacheMiddleware('products'),
+  asyncHandler(async (req, res) => {
+  const { category, subcategory, parentCategory, featured, search, brand, limit } = req.query
+
+    const andConditions = [{ isActive: true }, { hideFromShop: { $ne: true } }]
+
+    // Category filter
+    if (category && category !== "all" && category.match(/^[0-9a-fA-F]{24}$/)) {
+      andConditions.push({ category })
+    }
+
+    // Parent category filter (only if subcategory is not present)
+    if (!subcategory && parentCategory && parentCategory.match(/^[0-9a-fA-F]{24}$/)) {
+      andConditions.push({ parentCategory })
+    }
+
+    // Subcategory filter
+    if (subcategory && subcategory.match(/^[0-9a-fA-F]{24}$/)) {
+      andConditions.push({
+        $or: [
+          { category: subcategory },
+          { subCategory: subcategory },
+          { subCategory2: subcategory },
+          { subCategory3: subcategory },
+          { subCategory4: subcategory },
+        ],
+      })
+    }
+
+    // Search filter
+    if (typeof search === "string" && search.trim()) {
+      const searchCondition = await buildSearchConditions(search, Brand)
+      if (searchCondition) andConditions.push(searchCondition)
+    }
+
+    // Brand filter
+    if (brand) {
+      if (Array.isArray(brand)) {
+        andConditions.push({ brand: { $in: brand } })
+      } else if (typeof brand === "string" && brand.match(/^[0-9a-fA-F]{24}$/)) {
+        andConditions.push({ brand })
+      }
+    }
+
+    // Featured filter
+    if (featured === "true") {
+      andConditions.push({ featured: true })
+    }
+
+    let query = andConditions.length > 1 ? { $and: andConditions } : andConditions[0]
+
+    const parsedLimit = limit && !isNaN(limit) ? Number.parseInt(limit) : null
+
+    // This endpoint feeds the header search dropdown, where only a handful of rows are
+    // shown -- so the few that surface have to be the closest matches, not simply the
+    // most recently added products that happened to match. Ordering by relevance needs a
+    // second pass (aggregate for the order, then find for the populated documents), so it
+    // is only worth doing when the caller asked for a bounded number of rows.
+    let relevanceOrderedIds = null
+    if (search && typeof search === "string" && search.trim() && parsedLimit) {
+      const relevanceExpr = buildRelevanceExpression(search)
+      if (relevanceExpr) {
+        const ranked = await Product.aggregate([
+          { $match: query },
+          { $addFields: { _searchRelevance: relevanceExpr } },
+          { $sort: { _searchRelevance: -1, createdAt: -1, _id: -1 } },
+          { $limit: parsedLimit },
+          { $project: { _id: 1 } },
+        ])
+        if (ranked.length > 0) {
+          relevanceOrderedIds = ranked.map((doc) => doc._id)
+          query = { _id: { $in: relevanceOrderedIds } }
+        }
+      }
+    }
+
+    let productsQuery = Product.find(query)
+      .select(
+        "name nameAr slug sku price offerPrice discount image countInStock stockStatus stockStatusAr brand category subCategory parentCategory subCategory2 subCategory3 subCategory4 featured tags createdAt rating numReviews targetCountries countryStock",
+      )
+      .populate("brand", "name nameAr slug")
+      .populate("series", "name optionType")
+      .populate("model", "name optionType")
+      .populate("make", "name optionType")
+      .populate("manufacturer", "name optionType")
+      .populate("soldBy", "name optionType")
+      .populate("category", "name nameAr slug")
+      .populate("subCategory", "name nameAr slug") // Populate legacy subCategory field
+      .populate("parentCategory", "name nameAr slug")
+      .populate("subCategory2", "name nameAr slug") // Populate Level 2 subcategories
+      .populate("subCategory3", "name nameAr slug") // Populate Level 3 subcategories
+      .populate("subCategory4", "name nameAr slug") // Populate Level 4 subcategories
+      .lean() // Use lean() for better performance
+      .sort({ createdAt: -1 })
+
+    // Apply limit only if specified (for specific use cases)
+    if (parsedLimit) {
+      productsQuery = productsQuery.limit(parsedLimit)
+    }
+
+    const products = await productsQuery
+
+    if (relevanceOrderedIds) {
+      // $in loses the ranked order, so restore it.
+      const rank = new Map(relevanceOrderedIds.map((id, index) => [String(id), index]))
+      products.sort((a, b) => (rank.get(String(a._id)) ?? 0) - (rank.get(String(b._id)) ?? 0))
+    }
+
+    res.json(products)
+  }),
+)
+
+// @desc    Fetch minimal products payload for client-side shop cache hydration
+// @route   GET /api/products/shop-cache
+// @access  Public
+router.get(
+  "/shop-cache",
+  cacheMiddleware("products", { keyPrefix: "shop-cache" }),
+  asyncHandler(async (req, res) => {
+    const products = await Product.find({ isActive: true, hideFromShop: { $ne: true } })
+      .select(
+        "name slug sku price basePrice offerPrice discount image galleryImages featured rating numReviews countInStock stockStatus brand parentCategory category subCategory subCategory2 subCategory3 subCategory4 parentCategoryName parentCategorySlug categoryName categorySlug subCategory2Name subCategory2Slug subCategory3Name subCategory3Slug subCategory4Name subCategory4Slug series model make manufacturer soldBy createdAt updatedAt targetCountries countryStock",
+      )
+      .populate("brand", "name slug")
+      .lean()
+      .sort({ createdAt: -1 })
+
+    res.json(products)
+  }),
+)
+
+// One field list for the shop grid, shared by the find() and aggregate() paths below so
+// the two can never return different shapes.
+const SHOP_QUERY_SELECT =
+  "name slug sku price basePrice offerPrice discount image galleryImages featured rating numReviews countInStock stockStatus brand parentCategory category subCategory subCategory2 subCategory3 subCategory4 parentCategoryName parentCategorySlug categoryName categorySlug subCategory2Name subCategory2Slug subCategory3Name subCategory3Slug subCategory4Name subCategory4Slug series model make manufacturer soldBy createdAt updatedAt"
+const SHOP_QUERY_PROJECTION = SHOP_QUERY_SELECT.split(/\s+/).reduce((acc, field) => {
+  acc[field] = 1
+  return acc
+}, {})
+
+// The shop grid's ordering rules, written for the aggregation pipeline. They mirror
+// filterProducts() in client/src/services/productCache.js: available products first, then
+// the chosen sort, comparing the offer price whenever one is set. The server renders the
+// first page and the client's cached catalogue re-renders the same grid a moment later, so
+// any disagreement here would show up as the list visibly reshuffling under the shopper.
+const OUT_OF_STOCK_LABELS = ["out of stock", "stock out", "outofstock"]
+const IN_STOCK_LABELS = [
+  "in stock",
+  "instock",
+  "available",
+  "available product",
+  "availableproduct",
+  "pre-order",
+  "preorder",
+]
+const NORMALIZED_STOCK_STATUS_EXPR = { $toLower: { $trim: { input: { $ifNull: ["$stockStatus", ""] } } } }
+// 0 = available, 1 = unavailable. An explicit status wins; otherwise fall back to the count.
+const STOCK_RANK_EXPR = {
+  $switch: {
+    branches: [
+      { case: { $in: [NORMALIZED_STOCK_STATUS_EXPR, OUT_OF_STOCK_LABELS] }, then: 1 },
+      { case: { $in: [NORMALIZED_STOCK_STATUS_EXPR, IN_STOCK_LABELS] }, then: 0 },
+      { case: { $gt: [{ $ifNull: ["$countInStock", 0] }, 0] }, then: 0 },
+    ],
+    default: 1,
+  },
+}
+// What a shopper actually pays -- used by the price filter.
+const EFFECTIVE_PRICE_EXPR = { $cond: [{ $gt: ["$offerPrice", 0] }, "$offerPrice", "$price"] }
+// The price sorts park anything without a usable price at the far end, so a zero or a bad
+// negative can never lead the page.
+const SORT_PRICE_ASC_EXPR = {
+  $cond: [
+    { $gt: ["$offerPrice", 0] },
+    "$offerPrice",
+    { $cond: [{ $gt: ["$price", 0] }, "$price", Number.MAX_VALUE] },
+  ],
+}
+const SORT_PRICE_DESC_EXPR = {
+  $cond: [{ $gt: ["$offerPrice", 0] }, "$offerPrice", { $cond: [{ $gt: ["$price", 0] }, "$price", 0] }],
+}
+// Case- and whitespace-insensitive, so " asus" cannot sort ahead of "24U421A-B".
+const SORT_NAME_EXPR = { $toLower: { $trim: { input: { $ifNull: ["$name", ""] } } } }
+
+// @desc    Fetch first-paint optimized shop products with filters
+// @route   GET /api/products/shop-query
+// @access  Public
+router.get(
+  "/shop-query",
+  cacheMiddleware("products", { keyPrefix: "shop-query" }),
+  asyncHandler(async (req, res) => {
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1)
+    const limit = Math.min(120, Math.max(1, Number.parseInt(req.query.limit, 10) || 30))
+    const sortBy = String(req.query.sortBy || "newest").trim()
+    const search = typeof req.query.search === "string" ? req.query.search.trim() : ""
+    const parentCategory = String(req.query.parent_category || req.query.parentCategory || "").trim()
+    const category = String(req.query.category || "").trim()
+    const subcategory2 = String(req.query.subcategory2 || "").trim()
+    const subcategory3 = String(req.query.subcategory3 || "").trim()
+    const subcategory4 = String(req.query.subcategory4 || "").trim()
+    const priceMin = parseFiniteNumber(req.query.priceMin)
+    const priceMax = parseFiniteNumber(req.query.priceMax)
+
+    const brandIds = parseObjectIdArrayFromQuery(req.query, ["brand", "brand[]"])
+    const seriesIds = parseObjectIdArrayFromQuery(req.query, ["series", "series[]"])
+    const modelIds = parseObjectIdArrayFromQuery(req.query, ["model", "model[]"])
+    const makeIds = parseObjectIdArrayFromQuery(req.query, ["make", "make[]"])
+    const manufacturerIds = parseObjectIdArrayFromQuery(req.query, ["manufacturer", "manufacturer[]"])
+    const soldByIds = parseObjectIdArrayFromQuery(req.query, ["soldBy", "soldBy[]"])
+    const stockStatuses = collectQueryValues(req.query, ["stockStatus", "stockStatus[]"])
+
+    const andConditions = [{ isActive: true }, { hideFromShop: { $ne: true } }]
+
+    if (parentCategory && mongoose.Types.ObjectId.isValid(parentCategory)) {
+      andConditions.push({ parentCategory })
+    }
+    if (category && mongoose.Types.ObjectId.isValid(category)) {
+      andConditions.push({
+        $or: [{ category }, { subCategory: category }],
+      })
+    }
+    if (subcategory2 && mongoose.Types.ObjectId.isValid(subcategory2)) {
+      andConditions.push({ subCategory2: subcategory2 })
+    }
+    if (subcategory3 && mongoose.Types.ObjectId.isValid(subcategory3)) {
+      andConditions.push({ subCategory3: subcategory3 })
+    }
+    if (subcategory4 && mongoose.Types.ObjectId.isValid(subcategory4)) {
+      andConditions.push({ subCategory4: subcategory4 })
+    }
+
+    if (brandIds.length > 0) andConditions.push({ brand: { $in: brandIds } })
+    if (seriesIds.length > 0) andConditions.push({ series: { $in: seriesIds } })
+    if (modelIds.length > 0) andConditions.push({ model: { $in: modelIds } })
+    if (makeIds.length > 0) andConditions.push({ make: { $in: makeIds } })
+    if (manufacturerIds.length > 0) andConditions.push({ manufacturer: { $in: manufacturerIds } })
+    if (soldByIds.length > 0) andConditions.push({ soldBy: { $in: soldByIds } })
+
+    const stockFilterCondition = buildPublicStockFilterCondition(stockStatuses)
+    if (stockFilterCondition) {
+      andConditions.push(stockFilterCondition)
+    }
+
+    if (priceMin !== null || priceMax !== null) {
+      const priceExpressions = []
+      if (priceMin !== null) {
+        priceExpressions.push({ $gte: [EFFECTIVE_PRICE_EXPR, priceMin] })
+      }
+      if (priceMax !== null) {
+        priceExpressions.push({ $lte: [EFFECTIVE_PRICE_EXPR, priceMax] })
+      }
+      if (priceExpressions.length > 0) {
+        andConditions.push({ $expr: priceExpressions.length === 1 ? priceExpressions[0] : { $and: priceExpressions } })
+      }
+    }
+
+    const buildQuery = (searchCondition) => {
+      const conditions = searchCondition ? [...andConditions, searchCondition] : andConditions
+      return conditions.length > 1 ? { $and: conditions } : conditions[0]
+    }
+
+    // Relevance only means something against a query; without one it degrades to newest.
+    const relevanceExpr = sortBy === "relevance" ? buildRelevanceExpression(search) : null
+
+    // Availability leads every sort, matching the client cache filter. `_id` closes each
+    // sort so paging stays stable when the preceding keys tie.
+    const sortStage = (() => {
+      switch (sortBy) {
+        case "price-low":
+          return { _stockRank: 1, _sortPriceAsc: 1, createdAt: -1, _id: -1 }
+        case "price-high":
+          return { _stockRank: 1, _sortPriceDesc: -1, createdAt: -1, _id: -1 }
+        case "name":
+          return { _stockRank: 1, _sortName: 1, createdAt: -1, _id: -1 }
+        case "relevance":
+          // No query to score against, so relevance degrades to newest.
+          return relevanceExpr
+            ? { _stockRank: 1, _searchRelevance: -1, createdAt: -1, _id: -1 }
+            : { _stockRank: 1, createdAt: -1, _id: -1 }
+        case "newest":
+        default:
+          return { _stockRank: 1, createdAt: -1, _id: -1 }
+      }
+    })()
+
+    const fetchPage = async (query) => {
+      const totalCount = await Product.countDocuments(query)
+
+      const sortFields = {
+        _stockRank: STOCK_RANK_EXPR,
+        _sortPriceAsc: SORT_PRICE_ASC_EXPR,
+        _sortPriceDesc: SORT_PRICE_DESC_EXPR,
+        _sortName: SORT_NAME_EXPR,
+      }
+      if (relevanceExpr) sortFields._searchRelevance = relevanceExpr
+
+      // Keep only the grid's fields plus the computed sort keys before sorting. A blocking
+      // sort holds its input in memory, and a full product document averages 12 KB mostly
+      // of description text, so sorting the whole catalogue unprojected would approach
+      // MongoDB's 100 MB sort limit as the catalogue grows.
+      const sortProjection = { ...SHOP_QUERY_PROJECTION }
+      for (const field of Object.keys(sortFields)) sortProjection[field] = 1
+
+      // aggregate() does no schema casting, so an id that arrived as a string would match
+      // nothing here even though countDocuments() found it. Cast the filter exactly as
+      // find() would before handing it to $match.
+      const docs = await Product.aggregate([
+        { $match: Product.find(query).cast(Product) },
+        { $addFields: sortFields },
+        { $project: sortProjection },
+        { $sort: sortStage },
+        { $skip: (page - 1) * limit },
+        { $limit: limit },
+        // Inclusion-only projection; it drops the computed sort fields on its own.
+        { $project: SHOP_QUERY_PROJECTION },
+      ])
+      // Aggregation skips Mongoose middleware, so brands are populated after the fact.
+      const products = await Product.populate(docs, { path: "brand", select: "name slug" })
+      return { products, totalCount }
+    }
+
+    const searchCondition = search ? await buildSearchConditions(search, Brand) : null
+    let result = await fetchPage(buildQuery(searchCondition))
+
+    // Nothing matched a name, code, tag, brand or category. Rather than show an empty
+    // page, widen the search into descriptions -- those hits score in the lowest
+    // relevance tier, so they can never bury a real match.
+    if (search && result.totalCount === 0) {
+      const wideCondition = await buildSearchConditions(search, Brand, { includeDescription: true })
+      if (wideCondition) {
+        const wideResult = await fetchPage(buildQuery(wideCondition))
+        if (wideResult.totalCount > 0) result = wideResult
+      }
+    }
+
+    const { products, totalCount } = result
+
+    res.json({
+      products,
+      totalCount,
+      page,
+      limit,
+      hasMore: page * limit < totalCount,
+    })
+  }),
+)
+
+// @desc    Fetch products with pagination (for specific use cases)
+// @route   GET /api/products/paginated
+// @access  Public
+router.get(
+  "/paginated",
+  cacheMiddleware('products'),
+  asyncHandler(async (req, res) => {
+  const { category, subcategory, parentCategory, featured, search, page = 1, limit = 20, brand } = req.query
+
+    const andConditions = [{ isActive: true }, { hideFromShop: { $ne: true } }]
+
+    if (category && category !== "all" && category.match(/^[0-9a-fA-F]{24}$/)) {
+      andConditions.push({ category })
+    }
+    if (!subcategory && parentCategory && parentCategory.match(/^[0-9a-fA-F]{24}$/)) {
+      andConditions.push({ parentCategory })
+    }
+    if (subcategory && subcategory.match(/^[0-9a-fA-F]{24}$/)) {
+      andConditions.push({
+        $or: [
+          { category: subcategory },
+          { subCategory: subcategory },
+          { subCategory2: subcategory },
+          { subCategory3: subcategory },
+          { subCategory4: subcategory },
+        ],
+      })
+    }
+
+    if (typeof search === "string" && search.trim()) {
+      const searchCondition = await buildSearchConditions(search, Brand)
+      if (searchCondition) andConditions.push(searchCondition)
+    }
+
+    if (brand) {
+      if (Array.isArray(brand)) {
+        andConditions.push({ brand: { $in: brand } })
+      } else if (typeof brand === "string" && brand.match(/^[0-9a-fA-F]{24}$/)) {
+        andConditions.push({ brand })
+      }
+    }
+
+    if (featured === "true") {
+      andConditions.push({ featured: true })
+    }
+
+    const query = andConditions.length > 1 ? { $and: andConditions } : andConditions[0]
+
+    // Get total count for pagination info
+    const totalCount = await Product.countDocuments(query)
+
+    const products = await Product.find(query)
+      .select(
+        "name nameAr slug sku price offerPrice discount image countInStock stockStatus stockStatusAr brand category parentCategory featured tags createdAt rating numReviews",
+      )
+      .populate("brand", "name nameAr slug")
+      .populate("series", "name optionType")
+      .populate("model", "name optionType")
+      .populate("make", "name optionType")
+      .populate("manufacturer", "name optionType")
+      .populate("soldBy", "name optionType")
+      .populate("category", "name nameAr slug")
+      .populate("parentCategory", "name nameAr slug")
+      .lean()
+      .skip((page - 1) * Number.parseInt(limit))
+      .limit(Number.parseInt(limit))
+      .sort({ createdAt: -1 })
+
+    res.json({
+      products,
+      totalCount,
+      currentPage: Number.parseInt(page),
+      totalPages: Math.ceil(totalCount / Number.parseInt(limit)),
+      hasMore: Number.parseInt(page) * Number.parseInt(limit) < totalCount,
+    })
+  }),
+)
+
+// @desc    Fetch products by SKU array
+// @route   POST /api/products/by-skus
+// @access  Public
+router.post(
+  "/by-skus",
+  asyncHandler(async (req, res) => {
+    const { skus } = req.body
+
+    if (!skus || !Array.isArray(skus)) {
+      return res.status(400).json({ message: "SKUs array is required" })
+    }
+
+    // Allow fetching products by SKU regardless of hideFromShop status
+    // Hidden products should be accessible via SKU lookup
+    const products = await Product.find({
+      sku: { $in: skus },
+      isActive: true,
+      // Note: We don't filter by hideFromShop here because SKU lookup should work for all products
+    })
+      .populate("category", "name slug")
+      .populate("subCategory", "name slug")
+      .populate("brand", "name slug")
+      .populate("series", "name optionType")
+      .populate("model", "name optionType")
+      .populate("make", "name optionType")
+      .populate("manufacturer", "name optionType")
+      .populate("soldBy", "name optionType")
+      .populate("parentCategory", "name slug")
+
+    res.json(products)
+  }),
+)
+
+// @desc    Bulk move products to new categories
+// @route   PUT /api/products/bulk-move
+// @access  Private/Admin
+router.put(
+  "/bulk-move",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    try {
+      console.log('Bulk move request received:', req.body)
+      
+      const { productIds, parentCategory, category, subCategory2, subCategory3, subCategory4 } = req.body
+      let parentCategoryDoc = null
+      let level1SubCategoryDoc = null
+      let level2SubCategoryDoc = null
+      let level3SubCategoryDoc = null
+      let level4SubCategoryDoc = null
+
+      if (!productIds || !Array.isArray(productIds) || productIds.length === 0) {
+        res.status(400)
+        throw new Error("Product IDs are required")
+      }
+
+      if (!parentCategory) {
+        res.status(400)
+        throw new Error("Parent category is required")
+      }
+
+      // Verify parent category exists
+      parentCategoryDoc = await Category.findById(parentCategory).select("name slug")
+      if (!parentCategoryDoc) {
+        res.status(400)
+        throw new Error("Invalid parent category")
+      }
+
+      // Verify subcategories if provided (only if not null/empty)
+      if (category && category !== '') {
+        level1SubCategoryDoc = await SubCategory.findById(category).select("name slug")
+        if (!level1SubCategoryDoc) {
+          res.status(400)
+          throw new Error("Invalid subcategory level 1")
+        }
+      }
+
+      if (subCategory2 && subCategory2 !== '') {
+        level2SubCategoryDoc = await SubCategory.findById(subCategory2).select("name slug")
+        if (!level2SubCategoryDoc) {
+          res.status(400)
+          throw new Error("Invalid subcategory level 2")
+        }
+      }
+
+      if (subCategory3 && subCategory3 !== '') {
+        level3SubCategoryDoc = await SubCategory.findById(subCategory3).select("name slug")
+        if (!level3SubCategoryDoc) {
+          res.status(400)
+          throw new Error("Invalid subcategory level 3")
+        }
+      }
+
+      if (subCategory4 && subCategory4 !== '') {
+        level4SubCategoryDoc = await SubCategory.findById(subCategory4).select("name slug")
+        if (!level4SubCategoryDoc) {
+          res.status(400)
+          throw new Error("Invalid subcategory level 4")
+        }
+      }
+
+      // Prepare update object - only set fields that have values
+      const updateData = {
+        parentCategory,
+        ...buildCategorySnapshotFromDocs({
+          parentCategoryDoc,
+          level1SubCategoryDoc,
+          level2SubCategoryDoc,
+          level3SubCategoryDoc,
+          level4SubCategoryDoc,
+        }),
+      }
+
+      if (category && category !== '') {
+        updateData.category = category
+        updateData.subCategory = category // for backward compatibility
+      } else {
+        updateData.category = null
+        updateData.subCategory = null
+      }
+
+      if (subCategory2 && subCategory2 !== '') {
+        updateData.subCategory2 = subCategory2
+      } else {
+        updateData.subCategory2 = null
+      }
+
+      if (subCategory3 && subCategory3 !== '') {
+        updateData.subCategory3 = subCategory3
+      } else {
+        updateData.subCategory3 = null
+      }
+
+      if (subCategory4 && subCategory4 !== '') {
+        updateData.subCategory4 = subCategory4
+      } else {
+        updateData.subCategory4 = null
+      }
+
+      console.log('Updating products with data:', updateData)
+      console.log('Product IDs:', productIds)
+
+      // Update all products
+      const result = await Product.updateMany(
+        { _id: { $in: productIds } },
+        { $set: updateData }
+      )
+
+      console.log('Update result:', result)
+
+      // Invalidate storefront product cache after bulk category move
+      await invalidateCache("products")
+
+      res.json({
+        message: `Successfully moved ${result.modifiedCount} product(s)`,
+        modifiedCount: result.modifiedCount,
+        matchedCount: result.matchedCount,
+      })
+    } catch (error) {
+      console.error('Bulk move error:', error)
+      res.status(500)
+      throw error
+    }
+  }),
+)
+
+// @desc    Bulk update product status (stock status and/or active/onhold flags)
+// @route   PUT /api/products/bulk-status
+// @access  Private/Admin
+router.put(
+  "/bulk-status",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    try {
+      console.log('Bulk status update request received:', req.body)
+      
+      const { productIds, isActive, onHold, stockStatus } = req.body
+
+      if (!productIds || !Array.isArray(productIds) || productIds.length === 0) {
+        res.status(400)
+        throw new Error("Product IDs are required")
+      }
+
+      // Prepare update object
+      const updateData = {}
+      
+      if (typeof isActive === 'boolean') {
+        updateData.isActive = isActive
+      }
+      
+      if (typeof onHold === 'boolean') {
+        updateData.onHold = onHold
+      }
+
+      if (stockStatus !== undefined && stockStatus !== null && String(stockStatus).trim() !== "") {
+        const normalizedStockStatus = normalizeAdminStockStatus(stockStatus)
+        if (!normalizedStockStatus) {
+          res.status(400)
+          throw new Error("Invalid stockStatus value. Allowed values: In Stock, Out of Stock, PreOrder")
+        }
+        updateData.stockStatus = normalizedStockStatus
+        const translatedStockStatus = await translateText(normalizedStockStatus)
+        updateData.stockStatusAr = translatedStockStatus || normalizedStockStatus
+      }
+
+      if (Object.keys(updateData).length === 0) {
+        res.status(400)
+        throw new Error("At least one status field (stockStatus, isActive, or onHold) is required")
+      }
+
+      console.log('Updating products with status:', updateData)
+      console.log('Product IDs count:', productIds.length)
+
+      // Update all products
+      const result = await Product.updateMany(
+        { _id: { $in: productIds } },
+        { $set: updateData }
+      )
+
+      console.log('Update result:', result)
+
+      // Invalidate storefront product cache after bulk status update
+      await invalidateCache("products")
+
+      // Determine status message
+      let statusMessage = ""
+      if (updateData.stockStatus) {
+        statusMessage = `set stock status to ${updateData.stockStatus === "PreOrder" ? "Pre Order" : updateData.stockStatus}`
+      } else if (updateData.onHold === true) {
+        statusMessage = "hidden from shop"
+      } else if (updateData.isActive === true) {
+        statusMessage = "activated"
+      } else if (updateData.isActive === false) {
+        statusMessage = "deactivated"
+      }
+
+      // Log activity
+      if (req.user) {
+        await logActivity({
+          user: req.user,
+          action: "BULK_ACTION",
+          module: "PRODUCTS",
+          description: `Bulk ${statusMessage} ${result.modifiedCount} product(s)`,
+          newData: { productCount: productIds.length, status: updateData },
+          req,
+        })
+      }
+
+      res.json({
+        message: `Successfully ${statusMessage} ${result.modifiedCount} product(s)`,
+        modifiedCount: result.modifiedCount,
+        matchedCount: result.matchedCount,
+      })
+    } catch (error) {
+      console.error('Bulk status update error:', error)
+      res.status(500)
+      throw error
+    }
+  }),
+)
+
+// @desc    Fetch single product by ID
+// @route   GET /api/products/:id
+// @access  Public
+router.get(
+  "/:id",
+  asyncHandler(async (req, res) => {
+    const product = await Product.findById(req.params.id)
+      .populate("category", "name nameAr slug")
+      .populate("brand", "name nameAr")
+      .populate("series", "name optionType")
+      .populate("model", "name optionType")
+      .populate("make", "name optionType")
+      .populate("manufacturer", "name optionType")
+      .populate("soldBy", "name optionType")
+
+    if (product && product.isActive) {
+      res.json(product)
+    } else {
+      res.status(404)
+      throw new Error("Product not found")
+    }
+  }),
+)
+
+// @desc    Fetch single product by slug
+// @route   GET /api/products/slug/:slug
+// @access  Public
+router.get(
+  "/slug/:slug",
+  asyncHandler(async (req, res) => {
+    const rawSlug = typeof req.params.slug === "string" ? req.params.slug : ""
+    let decodedSlug = rawSlug
+    try {
+      decodedSlug = decodeURIComponent(rawSlug)
+    } catch {
+      decodedSlug = rawSlug
+    }
+    const trimmedSlug = decodedSlug.trim().replace(/^\/+|\/+$/g, "")
+    const sanitizedSlug = sanitizeSlug(trimmedSlug)
+    const slugCandidates = Array.from(new Set([decodedSlug, trimmedSlug, sanitizedSlug].filter(Boolean)))
+
+    // Allow access to active products (both visible and hidden from shop)
+    // This ensures hidden products are accessible via direct link and variations
+    const product = await Product.findOne({ 
+      slug: { $in: slugCandidates }, 
+      isActive: true 
+      // Note: We don't filter by hideFromShop here because hidden products should be accessible via direct link
+    })
+      .populate("parentCategory", "name nameAr slug")
+      .populate("category", "name nameAr slug")
+      .populate("subCategory2", "name nameAr slug")
+      .populate("subCategory3", "name nameAr slug")
+      .populate("subCategory4", "name nameAr slug")
+      .populate("brand", "name nameAr")
+      .populate("series", "name optionType")
+      .populate("model", "name optionType")
+      .populate("make", "name optionType")
+      .populate("manufacturer", "name optionType")
+      .populate("soldBy", "name optionType")
+      .populate({
+        path: "variations.product",
+        select: "name nameAr slug image price offerPrice sku isActive hideFromShop selfVariationText selfVariationTextAr reverseVariationText reverseVariationTextAr",
+        // Populate all variation products regardless of hideFromShop status
+        // This ensures hidden variations are visible in the variations section
+      })
+      .populate({
+        path: "availableModels.product",
+        select: "name nameAr slug image price offerPrice sku isActive hideFromShop selfAvailableModelText selfAvailableModelTextAr",
+      })
+
+    if (product) {
+      res.json(product)
+    } else {
+      res.status(404)
+      throw new Error("Product not found")
+    }
+  }),
+)
+
+// @desc    Create a product review
+// @route   POST /api/products/:id/reviews
+// @access  Private
+router.post(
+  "/:id/reviews",
+  protect,
+  asyncHandler(async (req, res) => {
+    const { rating, comment, name } = req.body
+
+    const product = await Product.findById(req.params.id)
+
+    if (product) {
+      const alreadyReviewed = product.reviews.find((r) => r.user.toString() === req.user._id.toString())
+
+      if (alreadyReviewed) {
+        res.status(400)
+        throw new Error("Product already reviewed")
+      }
+
+      const review = {
+        name: name || req.user.name,
+        rating: Number(rating),
+        comment,
+        user: req.user._id,
+        createdAt: new Date(),
+      }
+
+      product.reviews.push(review)
+
+      // Properly calculate numReviews and rating
+      product.numReviews = product.reviews.length
+      product.rating = product.reviews.reduce((acc, item) => Number(item.rating) + acc, 0) / product.reviews.length
+
+      await product.save()
+
+      // Log the updated values for debugging
+      console.log(
+        "Review added - Product:",
+        product.name,
+        "New Rating:",
+        product.rating,
+        "NumReviews:",
+        product.numReviews,
+      )
+
+      res.status(201).json({ message: "Review added", rating: product.rating, numReviews: product.numReviews })
+    } else {
+      res.status(404)
+      throw new Error("Product not found")
+    }
+  }),
+)
+
+// @desc    Create a product
+// @route   POST /api/products
+// @access  Private/Admin
+router.post(
+  "/",
+  protect,
+  admin,
+  requireSeoUnlockIfBodyHas(PRODUCT_SEO_LOCK_FIELDS),
+  asyncHandler(async (req, res) => {
+    const { parentCategory, category, subCategory2, subCategory3, subCategory4, ...productData } = req.body
+    normalizeProductMediaPayload(productData)
+    let parentCategoryDoc = null
+    let level1SubCategoryDoc = null
+    let level2SubCategoryDoc = null
+    let level3SubCategoryDoc = null
+    let level4SubCategoryDoc = null
+
+    // Verify parentCategory exists
+    if (parentCategory) {
+      parentCategoryDoc = await Category.findById(parentCategory).select("name slug")
+      if (!parentCategoryDoc) {
+        res.status(400)
+        throw new Error("Invalid parent category")
+      }
+    } else {
+      res.status(400)
+      throw new Error("Parent category is required")
+    }
+
+    // Verify subcategory exists if provided
+    if (category) {
+      level1SubCategoryDoc = await SubCategory.findById(category).select("name slug")
+      if (!level1SubCategoryDoc) {
+        res.status(400)
+        throw new Error("Invalid subcategory")
+      }
+    }
+
+    // Verify subCategory2 exists if provided
+    if (subCategory2) {
+      level2SubCategoryDoc = await SubCategory.findById(subCategory2).select("name slug")
+      if (!level2SubCategoryDoc) {
+        res.status(400)
+        throw new Error("Invalid subcategory level 2")
+      }
+    }
+
+    // Verify subCategory3 exists if provided
+    if (subCategory3) {
+      level3SubCategoryDoc = await SubCategory.findById(subCategory3).select("name slug")
+      if (!level3SubCategoryDoc) {
+        res.status(400)
+        throw new Error("Invalid subcategory level 3")
+      }
+    }
+
+    // Verify subCategory4 exists if provided
+    if (subCategory4) {
+      level4SubCategoryDoc = await SubCategory.findById(subCategory4).select("name slug")
+      if (!level4SubCategoryDoc) {
+        res.status(400)
+        throw new Error("Invalid subcategory level 4")
+      }
+    }
+
+    // Sanitize slug if provided and check uniqueness
+    if (productData.slug) {
+      productData.slug = sanitizeSlug(productData.slug)
+      const existingProduct = await Product.findOne({ slug: productData.slug })
+      if (existingProduct) {
+        res.status(400)
+        throw new Error("Product slug already exists")
+      }
+    }
+
+    const normalizedSKU = normalizeOptionalUniqueField(productData.sku)
+    const normalizedBarcode = normalizeOptionalUniqueField(productData.barcode)
+    const normalizedGTIN = normalizeOptionalUniqueField(productData.gtin)
+
+    // Check SKU uniqueness if provided
+    if (normalizedSKU) {
+      const existingSKU = await Product.findOne({ sku: normalizedSKU })
+      if (existingSKU) {
+        res.status(400)
+        throw new Error(`SKU '${normalizedSKU}' already exists`)
+      }
+    }
+
+    // Check barcode uniqueness if provided
+    if (normalizedBarcode) {
+      const existingBarcode = await Product.findOne({ barcode: normalizedBarcode })
+      if (existingBarcode) {
+        res.status(400)
+        throw new Error(`Barcode '${normalizedBarcode}' already exists`)
+      }
+    }
+
+    // Check GTIN uniqueness if provided
+    if (normalizedGTIN) {
+      const existingGTIN = await Product.findOne({ gtin: normalizedGTIN })
+      if (existingGTIN) {
+        res.status(400)
+        throw new Error(`GTIN '${normalizedGTIN}' already exists`)
+      }
+    }
+
+    // Ensure slug exists
+    if (!productData.slug && productData.name) {
+      productData.slug = generateSlug(productData.name)
+    }
+
+    // Normalize optional unique fields - set to undefined if empty to work with sparse index
+    productData.sku = normalizedSKU
+    productData.barcode = normalizedBarcode
+    productData.gtin = normalizedGTIN
+
+    // Translate product fields
+    let nameAr = "";
+    let descriptionAr = "";
+    let shortDescriptionAr = "";
+    let tagsAr = [];
+
+    if (productData.name) {
+      nameAr = await translateText(productData.name);
+    }
+    if (productData.description) {
+      descriptionAr = await translateText(productData.description);
+    }
+    if (productData.shortDescription) {
+      shortDescriptionAr = await translateText(productData.shortDescription);
+    }
+    if (productData.tags && Array.isArray(productData.tags)) {
+      tagsAr = await Promise.all(productData.tags.map(t => translateText(t)));
+    }
+
+    // Translate specifications
+    if (productData.specifications && Array.isArray(productData.specifications)) {
+      for (const spec of productData.specifications) {
+        if (spec.key && !spec.keyAr) spec.keyAr = await translateText(spec.key);
+        if (spec.value && !spec.valueAr) spec.valueAr = await translateText(spec.value);
+      }
+    }
+
+    // Translate stock status
+    let stockStatusAr = "";
+    if (productData.stockStatus) {
+      stockStatusAr = await translateText(productData.stockStatus);
+    }
+
+    // Translate variation texts
+    let reverseVariationTextAr = "";
+    let selfVariationTextAr = "";
+    let selfAvailableModelTextAr = "";
+    if (productData.reverseVariationText) {
+      reverseVariationTextAr = await translateText(productData.reverseVariationText);
+    }
+    if (productData.selfVariationText) {
+      selfVariationTextAr = await translateText(productData.selfVariationText);
+    }
+    if (productData.selfAvailableModelText) {
+      selfAvailableModelTextAr = await translateText(productData.selfAvailableModelText);
+    }
+
+    if (productData.variations && Array.isArray(productData.variations)) {
+      for (const v of productData.variations) {
+        if (v.variationText && !v.variationTextAr) {
+          v.variationTextAr = await translateText(v.variationText);
+        }
+      }
+    }
+
+    if (productData.availableModels && Array.isArray(productData.availableModels)) {
+      for (const model of productData.availableModels) {
+        if (model.variationText && !model.variationTextAr) {
+          model.variationTextAr = await translateText(model.variationText);
+        }
+      }
+    }
+
+    const product = new Product({
+      ...productData,
+      nameAr,
+      descriptionAr,
+      shortDescriptionAr,
+      tagsAr,
+      stockStatusAr,
+      reverseVariationTextAr,
+      selfVariationTextAr,
+      selfAvailableModelTextAr,
+      parentCategory,
+      category,
+      subCategory: category || undefined, // for backward compatibility
+      subCategory2: subCategory2 || undefined,
+      subCategory3: subCategory3 || undefined,
+      subCategory4: subCategory4 || undefined,
+      ...buildCategorySnapshotFromDocs({
+        parentCategoryDoc,
+        level1SubCategoryDoc,
+        level2SubCategoryDoc,
+        level3SubCategoryDoc,
+        level4SubCategoryDoc,
+      }),
+      createdBy: req.user._id,
+    })
+
+    const createdProduct = await product.save()
+    
+    // Bidirectional variation sync: Update all related products
+    if (productData.variations && Array.isArray(productData.variations)) {
+      const selfText = productData.selfVariationText || productData.reverseVariationText || ""
+      const variationIds = productData.variations
+        .filter(v => v && v.product && v.product !== createdProduct._id.toString())
+        .map(v => v.product)
+      
+      console.log(`[SYNC] Product ${createdProduct._id} adding variations:`, variationIds)
+      console.log(`[SYNC] Self variation text:`, selfText)
+      
+      // For each variation in this product
+      for (const variationId of variationIds) {
+        const variationProduct = await Product.findById(variationId)
+        if (variationProduct) {
+          let modified = false
+          
+          // Add current product to the variation's variations list if not already there
+          const existingVariationIndex = variationProduct.variations.findIndex(
+            v => (v.product || v).toString() === createdProduct._id.toString()
+          )
+          if (existingVariationIndex === -1) {
+            console.log(`[SYNC] Adding product ${createdProduct._id} to ${variationProduct._id}'s variations`)
+            // Note: We store empty variationText here because we'll use selfVariationText from the product itself
+            variationProduct.variations.push({ 
+              product: createdProduct._id, 
+              variationText: "" 
+            })
+            variationProduct.markModified('variations')
+            modified = true
+          }
+          
+          // Also sync other variations bidirectionally (full mesh connectivity)
+          const otherVariationIds = variationIds.filter(id => id !== variationId)
+          for (const otherId of otherVariationIds) {
+            const hasOther = variationProduct.variations.some(
+              v => (v.product || v).toString() === otherId
+            )
+            if (!hasOther) {
+              console.log(`[SYNC] Adding cross-variation ${otherId} to ${variationProduct._id}`)
+              variationProduct.variations.push({ product: otherId, variationText: "" })
+              variationProduct.markModified('variations')
+              modified = true
+            }
+          }
+          
+          if (modified) {
+            await variationProduct.save()
+            console.log(`[SYNC] Saved ${variationProduct._id} with ${variationProduct.variations.length} variations`)
+          }
+        }
+      }
+    }
+
+    // One-way availableModels linking: no sync back to modelProduct is performed.
+    
+
+    
+    const populatedProduct = await Product.findById(createdProduct._id)
+      .populate("parentCategory", "name slug")
+      .populate("category", "name slug")
+      .populate("subCategory2", "name slug")
+      .populate("subCategory3", "name slug")
+      .populate("subCategory4", "name slug")
+      .populate("brand", "name")
+      .populate("series", "name optionType")
+      .populate("model", "name optionType")
+      .populate("make", "name optionType")
+      .populate("manufacturer", "name optionType")
+      .populate("soldBy", "name optionType")
+      .populate({
+        path: "variations.product",
+        select: "name slug image price offerPrice sku selfVariationText reverseVariationText"
+      })
+      .populate({
+        path: "availableModels.product",
+        select: "name slug image price offerPrice sku selfAvailableModelText"
+      })
+
+    // Log activity
+    await logActivity(req, "CREATE", "PRODUCTS", `Created product: ${createdProduct.name}`, createdProduct._id, createdProduct.name)
+
+    // Invalidate product cache
+    await invalidateCache('products')
+
+    // Submit to IndexNow
+    if (createdProduct.isActive && !createdProduct.isDeleted) {
+      submitProduct(createdProduct, "create", req.user?._id).catch(err => console.error("IndexNow error:", err))
+    }
+
+    res.status(201).json(populatedProduct)
+  }),
+)
+
+// @desc    Update a product
+// @route   PUT /api/products/:id
+// @access  Private/Admin
+router.put(
+  "/:id",
+  protect,
+  admin,
+  requireSeoUnlockIfBodyHas(PRODUCT_SEO_LOCK_FIELDS),
+  asyncHandler(async (req, res) => {
+    const product = await Product.findById(req.params.id)
+
+    if (product) {
+      const { parentCategory, category, subCategory2, subCategory3, subCategory4, slug, ...updateData } = req.body
+      normalizeProductMediaPayload(updateData)
+
+      // Verify parentCategory exists if provided
+      if (parentCategory) {
+        const parentCategoryExists = await Category.findById(parentCategory)
+        if (!parentCategoryExists) {
+          res.status(400)
+          throw new Error("Invalid parent category")
+        }
+      }
+
+      // Verify subcategory exists if provided
+      if (category) {
+        const subCategoryExists = await SubCategory.findById(category)
+        if (!subCategoryExists) {
+          res.status(400)
+          throw new Error("Invalid subcategory")
+        }
+      }
+
+      // Verify subCategory2 exists if provided
+      if (subCategory2) {
+        const subCategory2Exists = await SubCategory.findById(subCategory2)
+        if (!subCategory2Exists) {
+          res.status(400)
+          throw new Error("Invalid subcategory level 2")
+        }
+      }
+
+      // Verify subCategory3 exists if provided
+      if (subCategory3) {
+        const subCategory3Exists = await SubCategory.findById(subCategory3)
+        if (!subCategory3Exists) {
+          res.status(400)
+          throw new Error("Invalid subcategory level 3")
+        }
+      }
+
+      // Verify subCategory4 exists if provided
+      if (subCategory4) {
+        const subCategory4Exists = await SubCategory.findById(subCategory4)
+        if (!subCategory4Exists) {
+          res.status(400)
+          throw new Error("Invalid subcategory level 4")
+        }
+      }
+
+      const targetParentCategoryId = parentCategory || product.parentCategory
+      const targetCategoryId = category ? category : product.category
+      const targetSubCategory2Id = subCategory2 !== undefined ? subCategory2 || null : product.subCategory2
+      const targetSubCategory3Id = subCategory3 !== undefined ? subCategory3 || null : product.subCategory3
+      const targetSubCategory4Id = subCategory4 !== undefined ? subCategory4 || null : product.subCategory4
+
+      const [parentCategoryDoc, level1SubCategoryDoc, level2SubCategoryDoc, level3SubCategoryDoc, level4SubCategoryDoc] =
+        await Promise.all([
+          targetParentCategoryId ? Category.findById(targetParentCategoryId).select("name slug") : null,
+          targetCategoryId ? SubCategory.findById(targetCategoryId).select("name slug") : null,
+          targetSubCategory2Id ? SubCategory.findById(targetSubCategory2Id).select("name slug") : null,
+          targetSubCategory3Id ? SubCategory.findById(targetSubCategory3Id).select("name slug") : null,
+          targetSubCategory4Id ? SubCategory.findById(targetSubCategory4Id).select("name slug") : null,
+        ])
+
+      // Check if slug is unique (excluding current product)
+      if (slug && slug !== product.slug) {
+        const cleanSlug = sanitizeSlug(slug)
+        const existingProduct = await Product.findOne({ slug: cleanSlug, _id: { $ne: req.params.id } })
+        if (existingProduct) {
+          res.status(400)
+          throw new Error("Product slug already exists")
+        }
+        product.slug = cleanSlug
+      }
+
+      // Check SKU uniqueness if provided and changed (excluding current product)
+      if (updateData.sku !== undefined) {
+        const newSKU = normalizeOptionalUniqueField(updateData.sku)
+        if (newSKU && newSKU !== product.sku) {
+          const existingSKU = await Product.findOne({ sku: newSKU, _id: { $ne: req.params.id } })
+          if (existingSKU) {
+            res.status(400)
+            throw new Error(`SKU '${newSKU}' already exists`)
+          }
+        }
+        updateData.sku = newSKU
+      }
+
+      // Check barcode uniqueness if provided and changed (excluding current product)
+      if (updateData.barcode !== undefined) {
+        const newBarcode = normalizeOptionalUniqueField(updateData.barcode)
+        if (newBarcode && newBarcode !== product.barcode) {
+          const existingBarcode = await Product.findOne({ barcode: newBarcode, _id: { $ne: req.params.id } })
+          if (existingBarcode) {
+            res.status(400)
+            throw new Error(`Barcode '${newBarcode}' already exists`)
+          }
+        }
+        updateData.barcode = newBarcode
+      }
+
+      // Check GTIN uniqueness if provided and changed (excluding current product)
+      if (updateData.gtin !== undefined) {
+        const newGTIN = normalizeOptionalUniqueField(updateData.gtin)
+        if (newGTIN && newGTIN !== product.gtin) {
+          const existingGTIN = await Product.findOne({ gtin: newGTIN, _id: { $ne: req.params.id } })
+          if (existingGTIN) {
+            res.status(400)
+            throw new Error(`GTIN '${newGTIN}' already exists`)
+          }
+        }
+        updateData.gtin = newGTIN
+      }
+
+      // Update product fields
+      for (const key of Object.keys(updateData)) {
+        product[key] = updateData[key]
+      }
+
+      // Translate updated fields
+      if (updateData.name !== undefined) product.nameAr = await translateText(product.name);
+      if (updateData.description !== undefined) product.descriptionAr = await translateText(product.description);
+      if (updateData.shortDescription !== undefined) product.shortDescriptionAr = await translateText(product.shortDescription);
+      if (updateData.tags !== undefined) {
+        if (Array.isArray(product.tags)) {
+          product.tagsAr = await Promise.all(product.tags.map(t => translateText(t)));
+        } else {
+          product.tagsAr = [];
+        }
+      }
+
+      // Translate specifications
+      if (updateData.specifications !== undefined && Array.isArray(product.specifications)) {
+        for (const spec of product.specifications) {
+          if (spec.key && !spec.keyAr) spec.keyAr = await translateText(spec.key);
+          if (spec.value && !spec.valueAr) spec.valueAr = await translateText(spec.value);
+        }
+      }
+
+      // Translate stock status
+      if (updateData.stockStatus !== undefined) {
+        product.stockStatusAr = await translateText(product.stockStatus);
+      }
+
+      // Translate variation texts
+      if (updateData.reverseVariationText !== undefined) {
+        product.reverseVariationTextAr = await translateText(product.reverseVariationText);
+      }
+      if (updateData.selfVariationText !== undefined) {
+        product.selfVariationTextAr = await translateText(product.selfVariationText);
+      }
+      if (updateData.selfAvailableModelText !== undefined) {
+        product.selfAvailableModelTextAr = await translateText(product.selfAvailableModelText);
+      }
+
+      if (updateData.variations !== undefined && Array.isArray(product.variations)) {
+        for (const v of product.variations) {
+          if (v.variationText && !v.variationTextAr) {
+            v.variationTextAr = await translateText(v.variationText);
+          }
+        }
+      }
+
+      if (updateData.availableModels !== undefined && Array.isArray(product.availableModels)) {
+        for (const model of product.availableModels) {
+          if (model.variationText && !model.variationTextAr) {
+            model.variationTextAr = await translateText(model.variationText);
+          }
+        }
+      }
+
+      if (parentCategory) product.parentCategory = parentCategory
+      if (category) {
+        product.category = category
+        product.subCategory = category // for backward compatibility
+      }
+      if (subCategory2 !== undefined) product.subCategory2 = subCategory2
+      if (subCategory3 !== undefined) product.subCategory3 = subCategory3
+      if (subCategory4 !== undefined) product.subCategory4 = subCategory4
+  // product.slug already set above if slug was provided
+      Object.assign(
+        product,
+        buildCategorySnapshotFromDocs({
+          parentCategoryDoc,
+          level1SubCategoryDoc,
+          level2SubCategoryDoc,
+          level3SubCategoryDoc,
+          level4SubCategoryDoc,
+        }),
+      )
+
+      const updatedProduct = await product.save()
+      
+      // Bidirectional variation sync: Update all related products
+      if (updateData.variations && Array.isArray(updateData.variations)) {
+        const selfText = updateData.selfVariationText || updateData.reverseVariationText || ""
+        const variationIds = updateData.variations
+          .filter(v => v && v.product && v.product !== product._id.toString())
+          .map(v => v.product)
+        
+        console.log(`[UPDATE SYNC] Product ${product._id} updating variations:`, variationIds)
+        console.log(`[UPDATE SYNC] Self variation text:`, selfText)
+        
+        // For each variation in this product
+        for (const variationId of variationIds) {
+          const variationProduct = await Product.findById(variationId)
+          if (variationProduct) {
+            let modified = false
+            
+            // Add current product to the variation's variations list if not already there
+            const existingVariationIndex = variationProduct.variations.findIndex(
+              v => (v.product || v).toString() === product._id.toString()
+            )
+            if (existingVariationIndex === -1) {
+              console.log(`[UPDATE SYNC] Adding product ${product._id} to ${variationProduct._id}'s variations`)
+              // Note: We store empty variationText here because we use selfVariationText from the product itself
+              variationProduct.variations.push({ 
+                product: product._id, 
+                variationText: "" 
+              })
+              variationProduct.markModified('variations')
+              modified = true
+            }
+            
+            // Also sync other variations bidirectionally (full mesh connectivity)
+            const otherVariationIds = variationIds.filter(id => id !== variationId)
+            for (const otherId of otherVariationIds) {
+              const hasOther = variationProduct.variations.some(
+                v => (v.product || v).toString() === otherId
+              )
+              if (!hasOther) {
+                console.log(`[UPDATE SYNC] Adding cross-variation ${otherId} to ${variationProduct._id}`)
+                variationProduct.variations.push({ product: otherId, variationText: "" })
+                variationProduct.markModified('variations')
+                modified = true
+              }
+            }
+            
+            if (modified) {
+              await variationProduct.save()
+              console.log(`[UPDATE SYNC] Saved ${variationProduct._id} with ${variationProduct.variations.length} variations`)
+            }
+          }
+        }
+        
+        // Remove current product from variations of products no longer in the list
+        const allProducts = await Product.find({ 
+          "variations.product": product._id,
+          _id: { $ne: product._id }
+        })
+        console.log(`[UPDATE SYNC] Found ${allProducts.length} products with current product in variations`)
+        for (const relatedProduct of allProducts) {
+          if (!variationIds.includes(relatedProduct._id.toString())) {
+            console.log(`[UPDATE SYNC] Removing product ${product._id} from ${relatedProduct._id}'s variations`)
+            relatedProduct.variations = relatedProduct.variations.filter(
+              v => (v.product || v).toString() !== product._id.toString()
+            )
+            relatedProduct.markModified('variations')
+            await relatedProduct.save()
+          }
+        }
+      }
+      
+      // One-way availableModels linking: no sync back or removal from modelProduct is performed.
+
+      const populatedProduct = await Product.findById(updatedProduct._id)
+        .populate("parentCategory", "name slug")
+        .populate("category", "name slug")
+        .populate("subCategory2", "name slug")
+        .populate("subCategory3", "name slug")
+        .populate("subCategory4", "name slug")
+        .populate("brand", "name")
+        .populate("series", "name optionType")
+        .populate("model", "name optionType")
+        .populate("make", "name optionType")
+        .populate("manufacturer", "name optionType")
+        .populate("soldBy", "name optionType")
+        .populate({
+          path: "variations.product",
+          select: "name slug image price offerPrice sku selfVariationText reverseVariationText"
+        })
+        .populate({
+          path: "availableModels.product",
+          select: "name slug image price offerPrice sku selfAvailableModelText"
+        })
+
+      // Log activity
+      await logActivity(req, "UPDATE", "PRODUCTS", `Updated product: ${updatedProduct.name}`, updatedProduct._id, updatedProduct.name)
+
+      // Invalidate product cache
+      await invalidateCache('products')
+
+      // Submit to IndexNow
+      if (updatedProduct.isActive && !updatedProduct.isDeleted) {
+        submitProduct(updatedProduct, "update", req.user?._id).catch(err => console.error("IndexNow error:", err))
+      }
+
+      res.json(populatedProduct)
+    } else {
+      res.status(404)
+      throw new Error("Product not found")
+    }
+  }),
+)
+
+// @desc    Duplicate a product
+// @route   POST /api/products/:id/duplicate
+// @access  Private/Admin
+router.post(
+  "/:id/duplicate",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const product = await Product.findById(req.params.id)
+
+    if (!product) {
+      res.status(404)
+      throw new Error("Product not found")
+    }
+
+    // Helper function to increment last digit
+    const incrementLastDigit = (str) => {
+      if (!str || str.trim() === "") return undefined
+      const match = str.match(/^(.*?)(\d+)$/)
+      if (match) {
+        const prefix = match[1]
+        const number = Number.parseInt(match[2])
+        const incremented = number + 1
+        // Preserve leading zeros
+        const paddedNumber = String(incremented).padStart(match[2].length, '0')
+        return prefix + paddedNumber
+      }
+      // If no number at end, append -1
+      return str + "-1"
+    }
+
+    // Duplicate SKU with incremented last digit
+    let newSKU = incrementLastDigit(product.sku)
+    if (newSKU) {
+      // Ensure SKU is unique
+      let counter = 1
+      while (await Product.findOne({ sku: newSKU })) {
+        newSKU = incrementLastDigit(newSKU)
+        counter++
+        if (counter > 100) {
+          // Safety limit to prevent infinite loop
+          newSKU = `${product.sku}-copy-${Date.now()}`
+          break
+        }
+      }
+    }
+
+    // Duplicate barcode with incremented last digit
+    let newBarcode = incrementLastDigit(product.barcode)
+    if (newBarcode) {
+      // Ensure barcode is unique
+      let counter = 1
+      while (await Product.findOne({ barcode: newBarcode })) {
+        newBarcode = incrementLastDigit(newBarcode)
+        counter++
+        if (counter > 100) {
+          // Safety limit to prevent infinite loop
+          newBarcode = `${product.barcode}-copy-${Date.now()}`
+          break
+        }
+      }
+    }
+
+    // Helper to extract base name and copy number
+    const extractCopyInfo = (name) => {
+      // Match patterns like "Product Name (Copy)", "Product Name (Copy 1)", "Product Name (Copy 2)", etc.
+      const copyMatch = name.match(/^(.+?)\s*\(Copy\s*(\d*)\)$/i)
+      if (copyMatch) {
+        const baseName = copyMatch[1].trim()
+        const copyNum = copyMatch[2] ? parseInt(copyMatch[2]) : 0
+        return { baseName, copyNum }
+      }
+      return { baseName: name, copyNum: null }
+    }
+
+    // Generate new product name with incremental copy number
+    const { baseName, copyNum } = extractCopyInfo(product.name)
+    let newName
+    if (copyNum === null) {
+      newName = `${baseName} (Copy)`
+    } else {
+      newName = `${baseName} (Copy ${copyNum + 1})`
+    }
+
+    // Ensure name is unique
+    let nameCounter = copyNum !== null ? copyNum + 1 : 1
+    while (await Product.findOne({ name: newName })) {
+      if (nameCounter === 1 && copyNum === null) {
+        newName = `${baseName} (Copy 1)`
+      } else {
+        newName = `${baseName} (Copy ${nameCounter})`
+      }
+      nameCounter++
+    }
+
+    // Extract base slug and copy number from slug
+    const extractSlugCopyInfo = (slug) => {
+      const duplicateMatch = slug.match(/^(.+?)-duplicate(?:-(\d+))?$/)
+      if (duplicateMatch) {
+        const baseSlug = duplicateMatch[1]
+        const copyNum = duplicateMatch[2] ? parseInt(duplicateMatch[2]) : 0
+        return { baseSlug, copyNum }
+      }
+      return { baseSlug: slug, copyNum: null }
+    }
+
+    // Generate new slug with incremental number
+    const { baseSlug, copyNum: slugCopyNum } = extractSlugCopyInfo(product.slug)
+    let newSlug
+    if (slugCopyNum === null) {
+      newSlug = `${baseSlug}-duplicate`
+    } else {
+      newSlug = `${baseSlug}-duplicate-${slugCopyNum + 1}`
+    }
+
+    // Ensure slug is unique
+    let slugCounter = slugCopyNum !== null ? slugCopyNum + 1 : 1
+    while (await Product.findOne({ slug: newSlug })) {
+      newSlug = `${baseSlug}-duplicate-${slugCounter}`
+      slugCounter++
+    }
+
+    // Collect all products in the original product's variation group
+    const variationGroupIds = new Set()
+    variationGroupIds.add(product._id.toString())
+    
+    // Add original product's variations
+    if (product.variations && product.variations.length > 0) {
+      product.variations.forEach(v => {
+        const varId = (v.product || v).toString()
+        variationGroupIds.add(varId)
+      })
+    }
+
+    // Create duplicated product with link to original and its variation group
+    const duplicatedProduct = new Product({
+      name: newName,
+      slug: newSlug,
+      sku: newSKU,
+      barcode: newBarcode,
+      stockStatus: product.stockStatus,
+      brand: product.brand,
+      parentCategory: product.parentCategory,
+      category: product.category,
+      subCategory: product.subCategory,
+      subCategory2: product.subCategory2,
+      subCategory3: product.subCategory3,
+      subCategory4: product.subCategory4,
+      description: product.description,
+      shortDescription: product.shortDescription,
+      buyingPrice: product.buyingPrice,
+      wholesalePrice: product.wholesalePrice,
+      price: product.price,
+      offerPrice: product.offerPrice,
+      discount: product.discount,
+      oldPrice: product.oldPrice,
+      image: product.image,
+      galleryImages: product.galleryImages,
+      countInStock: product.countInStock,
+      lowStockWarning: product.lowStockWarning,
+      maxPurchaseQty: product.maxPurchaseQty,
+      weight: product.weight,
+      unit: product.unit,
+      tax: product.tax,
+      deliveryCharge: product.deliveryCharge,
+      tags: product.tags,
+      isActive: false, // Set duplicated products to inactive by default
+      canPurchase: product.canPurchase,
+      showStockOut: product.showStockOut,
+      refundable: product.refundable,
+      featured: false, // Don't duplicate featured status
+      specifications: product.specifications,
+      colorVariations: product.colorVariations || [],
+      dosVariations: product.dosVariations || [],
+      // Link to original product and all its existing variations
+      variations: Array.from(variationGroupIds).map(id => ({
+        product: id,
+        variationText: "" // Will be updated when user edits the duplicated product
+      })),
+      selfVariationText: "", // User should set this when editing
+      reverseVariationText: "", // Backward compatibility
+      createdBy: req.user._id,
+    })
+
+    const createdProduct = await duplicatedProduct.save()
+    
+    // Bidirectional sync: Add the duplicated product to all products in the variation group
+    console.log(`[DUPLICATE SYNC] Adding duplicated product ${createdProduct._id} to variation group:`, Array.from(variationGroupIds))
+    
+    for (const groupProductId of variationGroupIds) {
+      const groupProduct = await Product.findById(groupProductId)
+      if (groupProduct) {
+        // Check if duplicated product is already in variations
+        const alreadyExists = groupProduct.variations.some(
+          v => (v.product || v).toString() === createdProduct._id.toString()
+        )
+        
+        if (!alreadyExists) {
+          groupProduct.variations.push({
+            product: createdProduct._id,
+            variationText: "" // Will show duplicated product's selfVariationText
+          })
+          groupProduct.markModified('variations')
+          await groupProduct.save()
+          console.log(`[DUPLICATE SYNC] Added ${createdProduct._id} to ${groupProductId}'s variations`)
+        }
+      }
+    }
+    
+    // Populate references for response
+    const populatedProduct = await Product.findById(createdProduct._id)
+      .populate("parentCategory", "name slug")
+      .populate("category", "name slug")
+      .populate("subCategory2", "name slug")
+      .populate("subCategory3", "name slug")
+      .populate("subCategory4", "name slug")
+      .populate("brand", "name")
+      .populate("series", "name optionType")
+      .populate("model", "name optionType")
+      .populate("make", "name optionType")
+      .populate("manufacturer", "name optionType")
+      .populate("soldBy", "name optionType")
+      .populate({
+        path: "variations.product",
+        select: "name slug image price offerPrice sku selfVariationText"
+      })
+
+    // Log activity
+    await logActivity(req, "CREATE", "PRODUCTS", `Duplicated product: ${populatedProduct.name} (from ${product.name})`, populatedProduct._id, populatedProduct.name)
+
+    // Invalidate product cache so storefront/admin lists refresh
+    await invalidateCache("products")
+
+    res.status(201).json(populatedProduct)
+  }),
+)
+
+// Helper function to extract media URLs from HTML description (TipTap content)
+const extractMediaUrlsFromHtml = (html) => {
+  const urls = []
+  if (!html) return urls
+
+  // Match image src attributes
+  const imgRegex = /<img[^>]+src=["']([^"']+)["']/gi
+  let match
+  while ((match = imgRegex.exec(html)) !== null) {
+    if (match[1] && match[1].includes('/uploads/')) {
+      urls.push(match[1])
+    }
+  }
+
+  // Match video src attributes
+  const videoRegex = /<video[^>]+src=["']([^"']+)["']/gi
+  while ((match = videoRegex.exec(html)) !== null) {
+    if (match[1] && match[1].includes('/uploads/')) {
+      urls.push(match[1])
+    }
+  }
+
+  // Match source src attributes (for video sources)
+  const sourceRegex = /<source[^>]+src=["']([^"']+)["']/gi
+  while ((match = sourceRegex.exec(html)) !== null) {
+    if (match[1] && match[1].includes('/uploads/')) {
+      urls.push(match[1])
+    }
+  }
+
+  return urls
+}
+
+// @desc    Delete a product
+// @route   DELETE /api/products/:id
+// @access  Private/Admin
+router.delete(
+  "/:id",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const product = await Product.findById(req.params.id)
+
+    if (product) {
+      // Delete main product image
+      if (product.image && !isCloudinaryUrl(product.image)) {
+        try {
+          await deleteLocalFile(product.image)
+        } catch (err) {
+          console.error("Error deleting product image:", err)
+        }
+      }
+
+      // Delete gallery images
+      if (product.galleryImages && product.galleryImages.length > 0) {
+        for (const img of product.galleryImages) {
+          if (img && !isCloudinaryUrl(img)) {
+            try {
+              await deleteLocalFile(img)
+            } catch (err) {
+              console.error("Error deleting gallery image:", err)
+            }
+          }
+        }
+      }
+
+      // Delete main video
+      if (product.video && !isCloudinaryUrl(product.video)) {
+        try {
+          await deleteLocalFile(product.video)
+        } catch (err) {
+          console.error("Error deleting product video:", err)
+        }
+      }
+
+      // Delete video gallery
+      if (product.videoGallery && product.videoGallery.length > 0) {
+        for (const vid of product.videoGallery) {
+          if (vid && !isCloudinaryUrl(vid)) {
+            try {
+              await deleteLocalFile(vid)
+            } catch (err) {
+              console.error("Error deleting gallery video:", err)
+            }
+          }
+        }
+      }
+
+      // Delete color variation images
+      if (product.colorVariations && product.colorVariations.length > 0) {
+        for (const colorVar of product.colorVariations) {
+          if (colorVar.image && !isCloudinaryUrl(colorVar.image)) {
+            try {
+              await deleteLocalFile(colorVar.image)
+            } catch (err) {
+              console.error("Error deleting color variation image:", err)
+            }
+          }
+          if (colorVar.galleryImages && colorVar.galleryImages.length > 0) {
+            for (const img of colorVar.galleryImages) {
+              if (img && !isCloudinaryUrl(img)) {
+                try {
+                  await deleteLocalFile(img)
+                } catch (err) {
+                  console.error("Error deleting color variation gallery image:", err)
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Delete variant images
+      if (product.variants && product.variants.length > 0) {
+        for (const variant of product.variants) {
+          if (variant.image && !isCloudinaryUrl(variant.image)) {
+            try {
+              await deleteLocalFile(variant.image)
+            } catch (err) {
+              console.error("Error deleting variant image:", err)
+            }
+          }
+          if (variant.galleryImages && variant.galleryImages.length > 0) {
+            for (const img of variant.galleryImages) {
+              if (img && !isCloudinaryUrl(img)) {
+                try {
+                  await deleteLocalFile(img)
+                } catch (err) {
+                  console.error("Error deleting variant gallery image:", err)
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Delete media files from description (TipTap content)
+      if (product.description) {
+        const descriptionMediaUrls = extractMediaUrlsFromHtml(product.description)
+        for (const url of descriptionMediaUrls) {
+          if (!isCloudinaryUrl(url)) {
+            try {
+              // Extract the path from full URL if needed
+              let filePath = url
+              if (url.includes('/uploads/')) {
+                filePath = '/uploads/' + url.split('/uploads/')[1]
+              }
+              await deleteLocalFile(filePath)
+            } catch (err) {
+              console.error("Error deleting description media:", err)
+            }
+          }
+        }
+      }
+
+      // Delete media files from shortDescription (if it has TipTap content)
+      if (product.shortDescription) {
+        const shortDescMediaUrls = extractMediaUrlsFromHtml(product.shortDescription)
+        for (const url of shortDescMediaUrls) {
+          if (!isCloudinaryUrl(url)) {
+            try {
+              let filePath = url
+              if (url.includes('/uploads/')) {
+                filePath = '/uploads/' + url.split('/uploads/')[1]
+              }
+              await deleteLocalFile(filePath)
+            } catch (err) {
+              console.error("Error deleting short description media:", err)
+            }
+          }
+        }
+      }
+
+      await product.deleteOne()
+      
+      // Log activity
+      if (req.user) {
+        await logActivity({
+          user: req.user,
+          action: "DELETE",
+          module: "PRODUCTS",
+          description: `Deleted product: ${product.name} (SKU: ${product.sku || 'N/A'})`,
+          targetId: product._id.toString(),
+          targetName: product.name,
+          previousData: { name: product.name, sku: product.sku, price: product.price },
+          req,
+        })
+      }
+      
+      // Invalidate product cache
+      await invalidateCache('products')
+      
+      // Submit to IndexNow
+      submitProduct(product, "delete", req.user?._id).catch(err => console.error("IndexNow error:", err))
+
+      res.json({ message: "Product removed" })
+    } else {
+      res.status(404)
+      throw new Error("Product not found")
+    }
+  }),
+)
+
+// @desc    Get products by category
+// @route   GET /api/products/category/:categoryId
+// @access  Public
+router.get(
+  "/category/:categoryId",
+  asyncHandler(async (req, res) => {
+    const products = await Product.find({
+      isActive: true,
+      hideFromShop: { $ne: true },
+      $or: [
+        { category: req.params.categoryId },
+        { subCategory: req.params.categoryId },
+        { subCategory2: req.params.categoryId },
+        { subCategory3: req.params.categoryId },
+        { subCategory4: req.params.categoryId },
+      ],
+    })
+      .populate("category", "name slug")
+      .populate("brand", "name")
+      .populate("series", "name optionType")
+      .populate("model", "name optionType")
+      .populate("make", "name optionType")
+      .populate("manufacturer", "name optionType")
+      .populate("soldBy", "name optionType")
+      .sort({ createdAt: -1 })
+
+    res.json(products)
+  }),
+)
+
+// @desc    Bulk preview products from Excel (supports 4 category levels)
+// @route   POST /api/products/bulk-preview
+// @access  Private/Admin
+router.post(
+  "/bulk-preview",
+  protect,
+  admin,
+  excelUpload.single("file"),
+  asyncHandler(async (req, res) => {
+    console.log("--- EXCEL BULK PREVIEW START ---")
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded" })
+    }
+    try {
+      // Read Excel from memory buffer (works on serverless too)
+      const workbook = XLSX.read(req.file.buffer, { type: "buffer" })
+      const sheetName = workbook.SheetNames[0]
+      const sheet = workbook.Sheets[sheetName]
+      const rows = XLSX.utils.sheet_to_json(sheet)
+      console.log("Excel rows loaded:", rows.length)
+
+      // Map headers to backend keys (includes 4-level category aliases)
+      const mappedRows = rows.map(remapRow)
+      
+      // DEBUG: Check first row mapping
+      if (mappedRows.length > 0) {
+        console.log('First mapped row keys:', Object.keys(mappedRows[0]))
+        console.log('First mapped row brand value:', mappedRows[0].brand)
+        console.log('Original first row keys:', Object.keys(rows[0]))
+      }
+
+      // Helper for flexible retrieval from mapped rows
+      const getField = (row, keys) => getBulkField(row, keys)
+
+      // Collect unique top-levels for upfront creation
+      const uniqueParentCategoryNames = new Set()
+      const uniqueLevel1Names = new Set()
+      const uniqueBrandNames = new Set()
+      const uniqueTaxNames = new Set()
+      const uniqueUnitNames = new Set()
+      const uniqueColorNames = new Set()
+      const uniqueWarrantyNames = new Set()
+      const uniqueSizeNames = new Set()
+      const uniqueVolumeNames = new Set()
+
+      mappedRows.forEach((row) => {
+        const parentName = getField(row, ["parent_category"]) // already normalized
+        const level1Name = getField(row, ["category"]) // normalized to level 1
+        if (parentName) uniqueParentCategoryNames.add(parentName)
+        if (level1Name) uniqueLevel1Names.add(level1Name)
+        if (row.brand) uniqueBrandNames.add(String(row.brand).trim())
+        if (row.tax) uniqueTaxNames.add(String(row.tax).trim())
+        if (row.unit) uniqueUnitNames.add(String(row.unit).trim())
+        if (row.color) uniqueColorNames.add(String(row.color).trim())
+        if (row.warranty) uniqueWarrantyNames.add(String(row.warranty).trim())
+        if (row.size) uniqueSizeNames.add(String(row.size).trim())
+        if (row.volume) uniqueVolumeNames.add(String(row.volume).trim())
+      })
+
+      // Fetch existing records
+      const existingParents = await Category.find({ name: { $in: Array.from(uniqueParentCategoryNames) } })
+      const existingLevel1Subs = await SubCategory.find({ name: { $in: Array.from(uniqueLevel1Names) }, level: 1 })
+      const normalizedBrandNames = Array.from(uniqueBrandNames)
+        .map((name) => normalizeLookupValue(name))
+        .filter(Boolean)
+      const brandNameRegexes = normalizedBrandNames.map((name) => buildCaseInsensitiveExactRegex(name)).filter(Boolean)
+      const brandSlugCandidates = normalizedBrandNames.map((name) => generateSlug(name))
+      const existingBrands =
+        normalizedBrandNames.length > 0
+          ? await Brand.find({
+              $or: [{ name: { $in: brandNameRegexes } }, { slug: { $in: brandSlugCandidates } }],
+            })
+          : []
+      const existingTaxes = await Tax.find({ name: { $in: Array.from(uniqueTaxNames) } })
+      const existingUnits = await Unit.find({ name: { $in: Array.from(uniqueUnitNames) } })
+      const existingColors = await Color.find({ name: { $in: Array.from(uniqueColorNames) } })
+      const existingWarranties = await Warranty.find({ name: { $in: Array.from(uniqueWarrantyNames) } })
+      const existingSizes = await Size.find({ name: { $in: Array.from(uniqueSizeNames) } })
+      const existingVolumes = await Volume.find({ name: { $in: Array.from(uniqueVolumeNames) } })
+
+      // Build maps
+      const parentCategoryMap = new Map()
+      existingParents.forEach((c) => parentCategoryMap.set(c.name.trim().toLowerCase(), c._id))
+      const level1Map = new Map()
+      existingLevel1Subs.forEach((s) => level1Map.set(s.name.trim().toLowerCase(), s._id))
+      const brandMap = new Map()
+      existingBrands.forEach((b) => {
+        const normalizedName = normalizeLookupValue(b.name).toLowerCase()
+        if (normalizedName) brandMap.set(normalizedName, b._id)
+        if (b.slug) brandMap.set(String(b.slug).toLowerCase(), b._id)
+      })
+      const taxMap = new Map()
+      existingTaxes.forEach((t) => taxMap.set(t.name.trim().toLowerCase(), t._id))
+      const unitMap = new Map()
+      existingUnits.forEach((u) => unitMap.set(u.name.trim().toLowerCase(), u._id))
+      const colorMap = new Map()
+      existingColors.forEach((c) => colorMap.set(c.name.trim().toLowerCase(), c._id))
+      const warrantyMap = new Map()
+      existingWarranties.forEach((w) => warrantyMap.set(w.name.trim().toLowerCase(), w._id))
+      const sizeMap = new Map()
+      existingSizes.forEach((s) => sizeMap.set(s.name.trim().toLowerCase(), s._id))
+      const volumeMap = new Map()
+      existingVolumes.forEach((v) => volumeMap.set(v.name.trim().toLowerCase(), v._id))
+
+      // Create missing parent categories
+      for (const name of uniqueParentCategoryNames) {
+        const key = name.trim().toLowerCase()
+        if (!parentCategoryMap.has(key)) {
+          const slug = generateSlug(name)
+          const bySlug = await Category.findOne({ slug })
+          if (bySlug) parentCategoryMap.set(key, bySlug._id)
+          else {
+            const created = await Category.create({ name: name.trim(), slug, createdBy: req.user?._id })
+            parentCategoryMap.set(key, created._id)
+          }
+        }
+      }
+
+      // Create missing level1 subcategories
+      for (const name of uniqueLevel1Names) {
+        const key = name.trim().toLowerCase()
+        if (!level1Map.has(key)) {
+          // find a row that pairs level1 with a parent
+          const rowWithParent = mappedRows.find((r) => r.category && r.category.trim().toLowerCase() === key && r.parent_category)
+          let parentCategoryId
+          if (rowWithParent) {
+            parentCategoryId = parentCategoryMap.get(rowWithParent.parent_category.trim().toLowerCase())
+          }
+          // First try to find by name (case-insensitive)
+          let existing = await SubCategory.findOne({ 
+            name: { $regex: new RegExp(`^${name.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+            level: 1 
+          })
+          
+          // If not found by name, try by slug
+          if (!existing) {
+            const slug = generateSlug(name)
+            existing = await SubCategory.findOne({ slug, level: 1 })
+          }
+          
+          // If still not found, create new
+          if (existing) {
+            level1Map.set(key, existing._id)
+          } else {
+            const slug = generateSlug(name)
+            const created = await SubCategory.create({
+              name: name.trim(),
+              slug,
+              category: parentCategoryId,
+              parentSubCategory: null,
+              level: 1,
+              createdBy: req.user?._id,
+            })
+            level1Map.set(key, created._id)
+          }
+        }
+      }
+
+      // Caches for deeper levels
+      const level2Cache = new Map()
+      const level3Cache = new Map()
+      const level4Cache = new Map()
+
+      // Helper to ensure deeper subcategories (levels 2-4)
+      const ensureSubCategory = async (name, parentCategoryId, parentSubId, level) => {
+        if (!name) return { id: undefined, isNew: false }
+        const key = `${parentCategoryId || ''}:${parentSubId || ''}:${level}:${name.trim().toLowerCase()}`
+        const cache = level === 2 ? level2Cache : level === 3 ? level3Cache : level4Cache
+        if (cache.has(key)) return cache.get(key)
+
+        const normalizedName = normalizeLookupValue(name)
+        const nameRegex = new RegExp(`^${escapeRegex(normalizedName)}$`, "i")
+        const scopedQuery = {
+          name: nameRegex,
+          level,
+          category: parentCategoryId,
+          isDeleted: { $ne: true },
+          ...(level > 1 ? { parentSubCategory: parentSubId || null } : {}),
+        }
+
+        let isNew = false
+        // First try exact scoped match (name + level + parent/category).
+        let existing = await SubCategory.findOne(scopedQuery)
+
+        // If not found by name, try slug in same scope.
+        if (!existing) {
+          const slug = generateSlug(normalizedName)
+          existing = await SubCategory.findOne({
+            slug,
+            level,
+            category: parentCategoryId,
+            isDeleted: { $ne: true },
+            ...(level > 1 ? { parentSubCategory: parentSubId || null } : {}),
+          })
+        }
+        
+        // If still not found, create new with unique slug
+        if (!existing) {
+          isNew = true
+          let slug = generateSlug(normalizedName)
+          // Check if slug exists at any level - if so, make it unique by appending level
+          const slugExists = await SubCategory.findOne({ slug })
+          if (slugExists) {
+            slug = `${slug}-${level}`
+            // If even that exists, append parent category id
+            const stillExists = await SubCategory.findOne({ slug })
+            if (stillExists) {
+              slug = `${generateSlug(normalizedName)}-${level}-${parentCategoryId.toString().slice(-4)}`
+            }
+          }
+          
+          existing = await SubCategory.create({
+            name: normalizedName,
+            slug,
+            category: parentCategoryId,
+            parentSubCategory: parentSubId || null,
+            level,
+            createdBy: req.user?._id,
+          })
+        }
+        const result = { id: existing._id, isNew, name: existing.name, slug: existing.slug }
+        cache.set(key, result)
+        return result
+      }
+
+      // Prepare duplicates check for preview (to show which will be updated)
+      const skus = mappedRows.map((r) => r.sku).filter(Boolean)
+      const names = mappedRows.map((r) => r.name).filter(Boolean)
+      const existingProducts = await Product.find({ 
+        $or: [
+          { sku: { $in: skus } }, 
+          { name: { $in: names } }
+        ] 
+      }).select("name slug sku")
+      
+      const existingBySku = new Map()
+      const existingByName = new Map()
+      existingProducts.forEach((p) => {
+        if (p.sku) existingBySku.set(p.sku, p)
+        if (p.name) existingByName.set(p.name, p)
+      })
+
+      // Build preview
+      const previewProducts = []
+      const invalidRows = []
+      const allowedStockStatus = ["In Stock", "Out of Stock", "PreOrder"]
+
+      for (const [i, row] of mappedRows.entries()) {
+        if (Object.values(row).every((v) => !v)) {
+          invalidRows.push({ row: i + 2, reason: "Empty row", data: row })
+          continue
+        }
+
+        const parentName = getField(row, ["parent_category"]) || ""
+        if (!row.name || !parentName) {
+          invalidRows.push({ row: i + 2, reason: "Missing required fields (name, parent_category)", data: row })
+          continue
+        }
+
+        // Check if this product exists (will be updated instead of created)
+        let willUpdate = false
+        let existingProduct = null
+        
+        if (row.sku && existingBySku.has(row.sku)) {
+          willUpdate = true
+          existingProduct = existingBySku.get(row.sku)
+        } else if (existingByName.has(row.name)) {
+          willUpdate = true
+          existingProduct = existingByName.get(row.name)
+        }
+
+        const parentCategoryId = parentCategoryMap.get(parentName.trim().toLowerCase())
+        const level1Name = getField(row, ["category"]) // normalized
+        const hierarchy = coerceCategoryHierarchy(
+          getField(row, ["subCategory2"]),
+          getField(row, ["subCategory3"]),
+          getField(row, ["subCategory4"]),
+        )
+        const level2Name = hierarchy.level2Name
+        const level3Name = hierarchy.level3Name
+        const level4Name = hierarchy.level4Name
+        const level1Id = level1Name ? level1Map.get(level1Name.trim().toLowerCase()) : undefined
+        const level2Data = await ensureSubCategory(level2Name, parentCategoryId, level1Id, 2)
+        const level3Data = await ensureSubCategory(level3Name, parentCategoryId, level2Data.id || level1Id, 3)
+        const level4Data = await ensureSubCategory(level4Name, parentCategoryId, level3Data.id || level2Data.id || level1Id, 4)
+
+        let stockStatus = row.stockStatus || "In Stock"
+        if (!allowedStockStatus.includes(stockStatus)) stockStatus = "In Stock"
+        
+        const rawBrand = getField(row, ["brand"]) || (row.brand ? normalizeLookupValue(row.brand) : "")
+        const brandId = rawBrand
+          ? brandMap.get(rawBrand.toLowerCase()) || brandMap.get(generateSlug(rawBrand))
+          : undefined
+        console.log(`Row brand value: "${row.brand}", normalized: "${rawBrand}", type: ${typeof row.brand}`)
+        console.log(`Brand ID resolved: ${brandId}, brandMap has: ${Array.from(brandMap.entries()).map(([k,v]) => `${k}:${v}`).join(', ')}`)
+        
+        const taxId = row.tax ? taxMap.get(String(row.tax).trim().toLowerCase()) : undefined
+        const unitId = row.unit ? unitMap.get(String(row.unit).trim().toLowerCase()) : undefined
+
+        previewProducts.push({
+          name: row.name || "",
+          // Sanitize a spreadsheet-supplied slug; raw values let ? : , & into URLs.
+          slug: row.slug ? sanitizeSlug(row.slug) : generateSlug(row.name || ""),
+          sku: row.sku || "",
+          barcode: row.barcode || "",
+          parentCategory: parentCategoryId,
+          category: level1Id,
+          subCategory2: level2Data?.id,
+          subCategory3: level3Data?.id,
+          subCategory4: level4Data?.id,
+          categoryStatus: {
+            level2: level2Data?.isNew ? 'new' : (level2Data?.id ? 'existing' : null),
+            level3: level3Data?.isNew ? 'new' : (level3Data?.id ? 'existing' : null),
+            level4: level4Data?.isNew ? 'new' : (level4Data?.id ? 'existing' : null),
+          },
+          brand: brandId || rawBrand || undefined,
+          buyingPrice: Number.parseFloat(row.buyingPrice) || 0,
+          wholesalePrice: parseOptionalPrice(row.wholesalePrice),
+          price: Number.parseFloat(row.price) || 0,
+          offerPrice: Number.parseFloat(row.offerPrice) || 0,
+          discount: Number.parseFloat(row.discount) || 0,
+          tax: taxId,
+          stockStatus,
+          showStockOut: row.showStockOut === "true" || row.showStockOut === true,
+          canPurchase: row.canPurchase === "true" || row.canPurchase === true,
+          refundable: row.refundable === "true" || row.refundable === true,
+          maxPurchaseQty: Number.parseInt(row.maxPurchaseQty) || 10,
+          lowStockWarning: Number.parseInt(row.lowStockWarning) || 5,
+          unit: unitId,
+          weight: Number.parseFloat(row.weight) || 0,
+          tags: row.tags ? String(row.tags).split(",").map((t) => t.trim()) : [],
+          description: row.description || "",
+          shortDescription: row.shortDescription || "",
+          specifications: parseSpecificationsInput(row.specifications),
+          details: row.details || "",
+          countInStock: Number.parseInt(row.countInStock) || 0,
+          isActive: true,
+          featured: false,
+          willUpdate: willUpdate, // Flag to indicate this will update existing product
+          existingProductId: existingProduct?._id, // ID of existing product
+        })
+      }
+
+      // Populate for preview display
+      const populatedPreviewProducts = await Promise.all(
+        previewProducts.map(async (prod) => {
+          const populated = { ...prod }
+          if (prod.parentCategory) {
+            const cat = await Category.findById(prod.parentCategory).select("name slug")
+            if (cat) populated.parentCategory = { _id: cat._id, name: cat.name, slug: cat.slug }
+          }
+          const populateSub = async (id) => (id ? await SubCategory.findById(id).select("name slug") : null)
+          if (prod.category) {
+            const s1 = await populateSub(prod.category)
+            if (s1) populated.category = { _id: s1._id, name: s1.name, slug: s1.slug }
+          }
+          if (prod.subCategory2) {
+            const s2 = await populateSub(prod.subCategory2)
+            if (s2) {
+              const status = prod.categoryStatus?.level2 === 'new' ? ' 🆕' : prod.categoryStatus?.level2 === 'existing' ? ' ✅' : ''
+              populated.subCategory2 = { _id: s2._id, name: s2.name + status, slug: s2.slug }
+            }
+          }
+          if (prod.subCategory3) {
+            const s3 = await populateSub(prod.subCategory3)
+            if (s3) {
+              const status = prod.categoryStatus?.level3 === 'new' ? ' 🆕' : prod.categoryStatus?.level3 === 'existing' ? ' ✅' : ''
+              populated.subCategory3 = { _id: s3._id, name: s3.name + status, slug: s3.slug }
+            }
+          }
+          if (prod.subCategory4) {
+            const s4 = await populateSub(prod.subCategory4)
+            if (s4) {
+              const status = prod.categoryStatus?.level4 === 'new' ? ' 🆕' : prod.categoryStatus?.level4 === 'existing' ? ' ✅' : ''
+              populated.subCategory4 = { _id: s4._id, name: s4.name + status, slug: s4.slug }
+            }
+          }
+          if (prod.brand && mongoose.Types.ObjectId.isValid(String(prod.brand))) {
+            const b = await Brand.findById(prod.brand).select("name slug")
+            if (b) populated.brand = { _id: b._id, name: b.name, slug: b.slug }
+          }
+          return populated
+        }),
+      )
+
+      res.json({
+        previewProducts: populatedPreviewProducts,
+        invalidRows,
+        total: rows.length,
+        valid: previewProducts.length,
+        invalid: invalidRows.length,
+      })
+    } catch (error) {
+      console.error("Bulk preview error:", error)
+      res.status(500).json({ message: "Bulk preview failed", error: error.message })
+    }
+  }),
+)
+
+// @desc    Bulk preview products from CSV (supports 4 category levels)
+// @route   POST /api/products/bulk-preview-csv
+// @access  Private/Admin
+router.post(
+  "/bulk-preview-csv",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    console.log("--- CSV BULK PREVIEW START ---")
+    const { csvData } = req.body
+    if (!csvData || !Array.isArray(csvData)) {
+      return res.status(400).json({ message: "No CSV data provided" })
+    }
+
+    // Helper for flexible column names
+    const getField = (row, keys) => getBulkField(row, keys)
+
+    // Collect unique names (parent + level1 + brand/tax/unit) for upfront creation
+    const uniqueParentCategoryNames = new Set()
+    const uniqueLevel1Names = new Set()
+    const uniqueBrandNames = new Set()
+    const uniqueTaxNames = new Set()
+    const uniqueUnitNames = new Set()
+
+    csvData.forEach((row) => {
+      const parentName = getField(row, ["parent_category", "parentCategory"])
+      const level1Name = getField(row, ["category", "subcategory", "sub_category", "category1", "category_level_1"])
+      if (parentName) uniqueParentCategoryNames.add(parentName)
+      if (level1Name) uniqueLevel1Names.add(level1Name)
+      const b = getField(row, ["brand"]) ; if (b) uniqueBrandNames.add(b)
+      const t = getField(row, ["tax"]) ; if (t) uniqueTaxNames.add(t)
+      const u = getField(row, ["unit"]) ; if (u) uniqueUnitNames.add(u)
+    })
+
+    // Fetch existing
+    const existingParents = await Category.find({ name: { $in: Array.from(uniqueParentCategoryNames) } })
+    const existingLevel1Subs = await SubCategory.find({ name: { $in: Array.from(uniqueLevel1Names) }, level: 1 })
+    const normalizedBrandNames = Array.from(uniqueBrandNames)
+      .map((name) => normalizeLookupValue(name))
+      .filter(Boolean)
+    const brandNameRegexes = normalizedBrandNames.map((name) => buildCaseInsensitiveExactRegex(name)).filter(Boolean)
+    const brandSlugCandidates = normalizedBrandNames.map((name) => generateSlug(name))
+    const existingBrands =
+      normalizedBrandNames.length > 0
+        ? await Brand.find({
+            $or: [{ name: { $in: brandNameRegexes } }, { slug: { $in: brandSlugCandidates } }],
+          })
+        : []
+    const existingTaxes = await Tax.find({ name: { $in: Array.from(uniqueTaxNames) } })
+    const existingUnits = await Unit.find({ name: { $in: Array.from(uniqueUnitNames) } })
+
+    // Maps
+    const parentCategoryMap = new Map()
+    existingParents.forEach((c) => parentCategoryMap.set(c.name.trim().toLowerCase(), c._id))
+    const level1Map = new Map()
+    existingLevel1Subs.forEach((s) => level1Map.set(s.name.trim().toLowerCase(), s._id))
+    const brandMap = new Map()
+    existingBrands.forEach((b) => {
+      const normalizedName = normalizeLookupValue(b.name).toLowerCase()
+      if (normalizedName) brandMap.set(normalizedName, b._id)
+      if (b.slug) brandMap.set(String(b.slug).toLowerCase(), b._id)
+    })
+    const taxMap = new Map()
+    existingTaxes.forEach((t) => taxMap.set(t.name.trim().toLowerCase(), t._id))
+    const unitMap = new Map()
+    existingUnits.forEach((u) => unitMap.set(u.name.trim().toLowerCase(), u._id))
+
+    // Create missing parent categories
+    for (const name of uniqueParentCategoryNames) {
+      const key = name.trim().toLowerCase()
+      if (!parentCategoryMap.has(key)) {
+        const slug = generateSlug(name)
+        const existingBySlug = await Category.findOne({ slug })
+        if (existingBySlug) {
+          parentCategoryMap.set(key, existingBySlug._id)
+        } else {
+          const created = await Category.create({ name: name.trim(), slug, createdBy: req.user?._id })
+          parentCategoryMap.set(key, created._id)
+        }
+      }
+    }
+
+    // Create missing level1 subcategories
+    for (const name of uniqueLevel1Names) {
+      const key = name.trim().toLowerCase()
+      if (!level1Map.has(key)) {
+        // attempt find parent from any row referencing this level1 + parent
+        const rowWithParent = csvData.find((r) => {
+          const l1 = getField(r, ["category", "subcategory", "sub_category", "category1", "category_level_1"])
+          return l1 && l1.trim().toLowerCase() === key && getField(r, ["parent_category", "parentCategory"]) // parent exists
+        })
+        let parentCategoryId = undefined
+        if (rowWithParent) {
+          const parentName = getField(rowWithParent, ["parent_category", "parentCategory"])?.trim().toLowerCase()
+          if (parentName) parentCategoryId = parentCategoryMap.get(parentName)
+        }
+        // First try to find by name (case-insensitive)
+        let existing = await SubCategory.findOne({ 
+          name: { $regex: new RegExp(`^${name.trim().replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}$`, 'i') },
+          level: 1 
+        })
+        
+        // If not found by name, try by slug
+        if (!existing) {
+          const slug = generateSlug(name)
+          existing = await SubCategory.findOne({ slug, level: 1 })
+        }
+        
+        // If still not found, create new
+        if (existing) {
+          level1Map.set(key, existing._id)
+        } else {
+          let slug = generateSlug(name)
+          // Check if slug exists at any level - if so, make it unique by appending level
+          const slugExists = await SubCategory.findOne({ slug })
+          if (slugExists) {
+            slug = `${slug}-1`
+            // If even that exists, append timestamp
+            const stillExists = await SubCategory.findOne({ slug })
+            if (stillExists) {
+              slug = `${generateSlug(name)}-1-${Date.now().toString().slice(-4)}`
+            }
+          }
+          const created = await SubCategory.create({
+            name: name.trim(),
+            slug,
+            category: parentCategoryId,
+            parentSubCategory: null,
+            level: 1,
+            createdBy: req.user?._id,
+          })
+          level1Map.set(key, created._id)
+        }
+      }
+    }
+
+    // Caches for deeper levels
+    const level2Cache = new Map()
+    const level3Cache = new Map()
+    const level4Cache = new Map()
+
+    // Fetch existing products to detect updates vs duplicates
+    const names = csvData.map((r) => r.name).filter(Boolean)
+    const slugs = csvData.map((r) => r.slug).filter(Boolean)
+    const skus = csvData.map((r) => getField(r, ["sku"])).filter(Boolean)
+    const barcodes = csvData.map((r) => getField(r, ["barcode"])).filter(Boolean)
+    const existingProducts = await Product.find({ 
+      $or: [
+        { name: { $in: names } }, 
+        { slug: { $in: slugs } },
+        ...(skus.length > 0 ? [{ sku: { $in: skus } }] : []),
+        ...(barcodes.length > 0 ? [{ barcode: { $in: barcodes } }] : [])
+      ] 
+    }).select("name slug sku barcode")
+    
+    // Create maps for existing products by SKU and name for update detection
+    const existingBySKU = new Map()
+    const existingByName = new Map()
+    existingProducts.forEach((p) => {
+      if (p.sku) existingBySKU.set(p.sku, p)
+      existingByName.set(p.name, p)
+    })
+    
+    // Track what we've seen in THIS batch to prevent duplicates within the file
+    const seenSKUs = new Set()
+    const seenNames = new Set()
+    const seenBarcodes = new Set()
+
+    const allowedStockStatus = ["In Stock", "Out of Stock", "PreOrder"]
+    const previewProducts = []
+    const invalidRows = []
+
+    // Helper to ensure a subcategory level (2-4)
+    const ensureSubCategory = async (name, parentCategoryId, parentSubId, level) => {
+      if (!name) return { id: undefined, isNew: false }
+      const key = `${parentCategoryId || ''}:${parentSubId || ''}:${level}:${name.trim().toLowerCase()}`
+      const cache = level === 2 ? level2Cache : level === 3 ? level3Cache : level4Cache
+      if (cache.has(key)) return cache.get(key)
+
+      const normalizedName = normalizeLookupValue(name)
+      const nameRegex = new RegExp(`^${escapeRegex(normalizedName)}$`, "i")
+      const scopedQuery = {
+        name: nameRegex,
+        level,
+        category: parentCategoryId,
+        isDeleted: { $ne: true },
+        ...(level > 1 ? { parentSubCategory: parentSubId || null } : {}),
+      }
+
+      let isNew = false
+      // First try exact scoped match (name + level + parent/category).
+      let existing = await SubCategory.findOne(scopedQuery)
+
+      // If not found by name, try slug in same scope.
+      if (!existing) {
+        const slug = generateSlug(normalizedName)
+        existing = await SubCategory.findOne({
+          slug,
+          level,
+          category: parentCategoryId,
+          isDeleted: { $ne: true },
+          ...(level > 1 ? { parentSubCategory: parentSubId || null } : {}),
+        })
+      }
+      
+      // If still not found, create new with unique slug
+      if (!existing) {
+        isNew = true
+        let slug = generateSlug(normalizedName)
+        // Check if slug exists at any level - if so, make it unique by appending level
+        const slugExists = await SubCategory.findOne({ slug })
+        if (slugExists) {
+          slug = `${slug}-${level}`
+          // If even that exists, append parent category id
+          const stillExists = await SubCategory.findOne({ slug })
+          if (stillExists) {
+            slug = `${generateSlug(normalizedName)}-${level}-${parentCategoryId.toString().slice(-4)}`
+          }
+        }
+        
+        existing = await SubCategory.create({
+          name: normalizedName,
+          slug,
+          category: parentCategoryId,
+          parentSubCategory: parentSubId || null,
+          level,
+          createdBy: req.user?._id,
+        })
+      }
+      const result = { id: existing._id, isNew, name: existing.name, slug: existing.slug }
+      cache.set(key, result)
+      return result
+    }
+
+    for (const [i, row] of csvData.entries()) {
+      if (Object.values(row).every((v) => !v)) {
+        invalidRows.push({ row: i + 2, reason: "Empty row", data: row })
+        continue
+      }
+      const parentName = getField(row, ["parent_category", "parentCategory"]) || ""
+      if (!row.name || !parentName) {
+        invalidRows.push({ row: i + 2, reason: "Missing required fields (name, parent_category)", data: row })
+        continue
+      }
+      
+      const rowSKU = getField(row, ["sku"])
+      const rowBarcode = getField(row, ["barcode"])
+      
+      // Check if this is an UPDATE (existing product by SKU or name)
+      let willUpdate = false
+      let existingProduct = null
+      
+      if (rowSKU && existingBySKU.has(rowSKU)) {
+        existingProduct = existingBySKU.get(rowSKU)
+        willUpdate = true
+      } else if (existingByName.has(row.name)) {
+        existingProduct = existingByName.get(row.name)
+        willUpdate = true
+      }
+      
+      // Check for duplicates WITHIN this batch (not updates)
+      if (!willUpdate) {
+        if (seenNames.has(row.name)) {
+          invalidRows.push({ row: i + 2, reason: "Duplicate product name in this file", data: row })
+          continue
+        }
+        if (rowSKU && seenSKUs.has(rowSKU)) {
+          invalidRows.push({ row: i + 2, reason: `Duplicate SKU in this file: ${rowSKU}`, data: row })
+          continue
+        }
+        if (rowBarcode && seenBarcodes.has(rowBarcode)) {
+          invalidRows.push({ row: i + 2, reason: `Duplicate Barcode in this file: ${rowBarcode}`, data: row })
+          continue
+        }
+      }
+      
+      // Track what we've seen in this batch
+      seenNames.add(row.name)
+      if (rowSKU) seenSKUs.add(rowSKU)
+      if (rowBarcode) seenBarcodes.add(rowBarcode)
+      const parentCategoryId = parentCategoryMap.get(parentName.trim().toLowerCase())
+      const level1Name = getField(row, ["category", "subcategory", "sub_category", "category1", "category_level_1"])
+      const hierarchy = coerceCategoryHierarchy(
+        getField(row, ["sub_category_2", "subcategory2", "subCategory2", "category2", "category_level_2"]),
+        getField(row, ["sub_category_3", "subcategory3", "subCategory3", "category3", "category_level_3"]),
+        getField(row, ["sub_category_4", "subcategory4", "subCategory4", "category4", "category_level_4"]),
+      )
+      const level2Name = hierarchy.level2Name
+      const level3Name = hierarchy.level3Name
+      const level4Name = hierarchy.level4Name
+      const level1Id = level1Name ? level1Map.get(level1Name.trim().toLowerCase()) : undefined
+      const level2Data = await ensureSubCategory(level2Name, parentCategoryId, level1Id, 2)
+      const level3Data = await ensureSubCategory(level3Name, parentCategoryId, level2Data.id || level1Id, 3)
+      const level4Data = await ensureSubCategory(level4Name, parentCategoryId, level3Data.id || level2Data.id || level1Id, 4)
+
+      let stockStatus = row.stockStatus || "In Stock"
+      if (!allowedStockStatus.includes(stockStatus)) stockStatus = "In Stock"
+      const rawBrand = getField(row, ["brand"]) || ""
+      const brandId = rawBrand
+        ? brandMap.get(rawBrand.toLowerCase()) || brandMap.get(generateSlug(rawBrand))
+        : undefined
+      const taxId = row.tax ? taxMap.get(String(row.tax).trim().toLowerCase()) : undefined
+      const unitId = row.unit ? unitMap.get(String(row.unit).trim().toLowerCase()) : undefined
+
+      // Auto-calculate discount percentage from price and offerPrice
+      const price = Number.parseFloat(row.price) || 0
+      const offerPrice = Number.parseFloat(row.offerPrice) || 0
+      let discount = 0
+      if (price > 0 && offerPrice > 0 && offerPrice < price) {
+        discount = Math.round(((price - offerPrice) / price) * 100)
+      }
+
+      previewProducts.push({
+        name: row.name || "",
+        // Sanitize a spreadsheet-supplied slug; raw values let ? : , & into URLs.
+        slug: row.slug ? sanitizeSlug(row.slug) : generateSlug(row.name || ""),
+        sku: row.sku || "",
+        barcode: row.barcode || "",
+        parentCategory: parentCategoryId,
+        category: level1Id,
+        subCategory2: level2Data?.id,
+        subCategory3: level3Data?.id,
+        subCategory4: level4Data?.id,
+        categoryStatus: {
+          level2: level2Data?.isNew ? 'new' : (level2Data?.id ? 'existing' : null),
+          level3: level3Data?.isNew ? 'new' : (level3Data?.id ? 'existing' : null),
+          level4: level4Data?.isNew ? 'new' : (level4Data?.id ? 'existing' : null),
+        },
+        brand: brandId || rawBrand || undefined,
+        buyingPrice: Number.parseFloat(row.buyingPrice) || 0,
+        wholesalePrice: parseOptionalPrice(row.wholesalePrice),
+        price,
+        offerPrice,
+        discount,
+        tax: taxId,
+        stockStatus,
+        showStockOut: row.showStockOut === "true" || row.showStockOut === true,
+        canPurchase: row.canPurchase === "true" || row.canPurchase === true,
+        refundable: row.refundable === "true" || row.refundable === true,
+        maxPurchaseQty: Number.parseInt(row.maxPurchaseQty) || 10,
+        lowStockWarning: Number.parseInt(row.lowStockWarning) || 5,
+        unit: unitId,
+        weight: Number.parseFloat(row.weight) || 0,
+        tags: row.tags
+          ? String(row.tags)
+              .split(",")
+              .map((t) => t.trim())
+          : [],
+        description: row.description || "",
+        shortDescription: row.shortDescription || "",
+        specifications: parseSpecificationsInput(row.specifications),
+        details: row.details || "",
+        countInStock: Number.parseInt(row.countInStock) || 0,
+        isActive: true,
+        featured: false,
+        willUpdate, // Flag to indicate this will update an existing product
+      })
+    }
+
+    // Populate for preview
+    const populatedPreviewProducts = await Promise.all(
+      previewProducts.map(async (prod) => {
+        const populated = { ...prod }
+        if (prod.parentCategory) {
+          const cat = await Category.findById(prod.parentCategory).select("name slug")
+          if (cat) populated.parentCategory = { _id: cat._id, name: cat.name, slug: cat.slug }
+        }
+        const populateSub = async (id) => (id ? await SubCategory.findById(id).select("name slug") : null)
+        if (prod.category) {
+          const s1 = await populateSub(prod.category)
+          if (s1) populated.category = { _id: s1._id, name: s1.name, slug: s1.slug }
+        }
+        if (prod.subCategory2) {
+          const s2 = await populateSub(prod.subCategory2)
+          if (s2) {
+            const status = prod.categoryStatus?.level2 === 'new' ? ' 🆕' : prod.categoryStatus?.level2 === 'existing' ? ' ✅' : ''
+            populated.subCategory2 = { _id: s2._id, name: s2.name + status, slug: s2.slug }
+          }
+        }
+        if (prod.subCategory3) {
+          const s3 = await populateSub(prod.subCategory3)
+          if (s3) {
+            const status = prod.categoryStatus?.level3 === 'new' ? ' 🆕' : prod.categoryStatus?.level3 === 'existing' ? ' ✅' : ''
+            populated.subCategory3 = { _id: s3._id, name: s3.name + status, slug: s3.slug }
+          }
+        }
+        if (prod.subCategory4) {
+          const s4 = await populateSub(prod.subCategory4)
+          if (s4) {
+            const status = prod.categoryStatus?.level4 === 'new' ? ' 🆕' : prod.categoryStatus?.level4 === 'existing' ? ' ✅' : ''
+            populated.subCategory4 = { _id: s4._id, name: s4.name + status, slug: s4.slug }
+          }
+        }
+        if (prod.brand && mongoose.Types.ObjectId.isValid(String(prod.brand))) {
+          const b = await Brand.findById(prod.brand).select("name slug")
+          if (b) populated.brand = { _id: b._id, name: b.name, slug: b.slug }
+        }
+        return populated
+      }),
+    )
+
+    res.json({
+      previewProducts: populatedPreviewProducts,
+      invalidRows,
+      total: csvData.length,
+      valid: previewProducts.length,
+      invalid: invalidRows.length,
+    })
+  }),
+)
+
+// @desc    Bulk save products to database (CREATE or UPDATE)
+// @route   POST /api/products/bulk-save
+// @access  Private/Admin
+router.post(
+  "/bulk-save",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const products = req.body.products
+    if (!Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({ message: "No products to save" })
+    }
+
+    const results = []
+    let success = 0
+    let failed = 0
+    let created = 0
+    let updated = 0
+    const allowedStockStatus = ["In Stock", "Out of Stock", "PreOrder"]
+
+    // Collect all unique brand names to create missing ones
+    const brandNames = new Set()
+    products.forEach(prod => {
+      if (prod.brand) {
+        if (typeof prod.brand === 'string') {
+          const cleanName = prod.brand.replace(/\s+/g, ' ').trim()
+          if (cleanName) brandNames.add(cleanName)
+        } else if (prod.brand?.name) {
+          const cleanName = prod.brand.name.replace(/\s+/g, ' ').trim()
+          if (cleanName) brandNames.add(cleanName)
+        }
+      }
+    })
+
+    console.log('Brand names to process:', Array.from(brandNames))
+
+    // Fetch existing brands and create missing ones
+    const existingBrands = await Brand.find({ 
+      name: { $in: Array.from(brandNames).map(n => new RegExp(`^${n}$`, 'i')) } 
+    })
+    const brandMap = new Map()
+    existingBrands.forEach(b => {
+      brandMap.set(b.name.trim().toLowerCase(), b._id)
+      console.log(`Existing brand: ${b.name} -> ${b._id}`)
+    })
+
+    for (const name of brandNames) {
+      const key = name.trim().toLowerCase()
+      if (!brandMap.has(key)) {
+        console.log(`Creating new brand: ${name}`)
+        const slug = generateSlug(name)
+        
+        // Translate brand fields
+        const nameAr = await translateText(name.trim());
+        
+        const newBrand = await Brand.create({ 
+          name: name.trim(), 
+          nameAr,
+          slug, 
+          createdBy: req.user._id 
+        })
+        brandMap.set(key, newBrand._id)
+        console.log(`Created brand: ${newBrand.name} -> ${newBrand._id}`)
+      }
+    }
+
+    for (const [i, prod] of products.entries()) {
+      try {
+        // Skip row if all fields are empty/falsy
+        if (Object.values(prod).every((v) => !v)) {
+          console.log(`Product ${i}: Skipped - Empty row`)
+          results.push({ index: i, status: "failed", reason: "Empty row", product: prod })
+          failed++
+          continue
+        }
+
+        // Validate required fields
+        if (!prod.name || !prod.parentCategory) {
+          console.log(`Product ${i}: Failed - Missing required fields (name: ${prod.name}, parentCategory: ${prod.parentCategory})`)
+          results.push({ index: i, status: "failed", reason: "Missing required fields (name, parentCategory)", product: prod })
+          failed++
+          continue
+        }
+
+        // Check if product exists by SKU (primary identifier) or name
+        let existing = null
+        
+        if (prod.sku && prod.sku.trim() !== "") {
+          existing = await Product.findOne({ sku: prod.sku.trim() })
+        }
+        
+        // If no SKU match, try by name
+        if (!existing) {
+          existing = await Product.findOne({ name: prod.name })
+        }
+
+        // Use defaults for missing fields
+        let stockStatus = prod.stockStatus || "In Stock"
+        if (!allowedStockStatus.includes(stockStatus)) stockStatus = "In Stock"
+
+        // Extract IDs from populated objects or use direct IDs
+        const parentCategoryId = prod.parentCategory?._id || prod.parentCategory
+        const categoryId = prod.category?._id || prod.category // level 1
+        const subCategory2Id = prod.subCategory2?._id || prod.subCategory2
+        const subCategory3Id = prod.subCategory3?._id || prod.subCategory3
+        const subCategory4Id = prod.subCategory4?._id || prod.subCategory4
+        
+        // Resolve brand - from map if string, or extract ID if object
+        let brandId = null
+        
+        if (mongoose.Types.ObjectId.isValid(prod.brand)) {
+          // Brand is already an ObjectId
+          brandId = prod.brand
+          console.log(`Product ${i} - Brand is already ObjectId: ${brandId}`)
+        } else if (prod.brand?._id && mongoose.Types.ObjectId.isValid(prod.brand._id)) {
+          // Brand is an object with _id (from preview)
+          brandId = prod.brand._id
+          console.log(`Product ${i} - Brand extracted from object: ${brandId}`)
+        } else if (typeof prod.brand === 'string') {
+          // Brand is a string name, look up in brandMap
+          const cleanName = prod.brand.replace(/\s+/g, ' ').trim()
+          brandId = brandMap.get(cleanName.toLowerCase())
+          console.log(`Product ${i} - Resolving brand string "${prod.brand}" -> cleaned "${cleanName}" -> ID: ${brandId}`)
+        } else if (prod.brand?.name) {
+          // Brand is an object with name property
+          const cleanName = prod.brand.name.replace(/\s+/g, ' ').trim()
+          brandId = brandMap.get(cleanName.toLowerCase()) || prod.brand._id
+          console.log(`Product ${i} - Resolving brand object "${prod.brand.name}" -> cleaned "${cleanName}" -> ID: ${brandId}`)
+        }
+        
+        if (!brandId) {
+          console.log(`Product ${i} - WARNING: No brandId resolved from:`, prod.brand)
+        }
+        
+        const taxId = prod.tax?._id || prod.tax
+        const unitId = prod.unit?._id || prod.unit
+
+        // Auto-calculate discount percentage from price and offerPrice
+        const price = prod.price || 0
+        const offerPrice = prod.offerPrice || 0
+        let discount = 0
+        if (price > 0 && offerPrice > 0 && offerPrice < price) {
+          discount = Math.round(((price - offerPrice) / price) * 100)
+        }
+
+        // Translate product fields
+        const nameAr = await translateText(prod.name);
+        const descriptionAr = await translateText(prod.description || "");
+        const shortDescriptionAr = await translateText(prod.shortDescription || "");
+        const stockStatusAr = await translateText(stockStatus);
+        
+        let tagsAr = [];
+        if (prod.tags && Array.isArray(prod.tags)) {
+          tagsAr = await Promise.all(prod.tags.map(t => translateText(t)));
+        }
+
+        const parsedSpecifications = parseSpecificationsInput(prod.specifications)
+
+        // Translate specifications
+        if (parsedSpecifications.length > 0) {
+          for (const spec of parsedSpecifications) {
+            if (spec.key && !spec.keyAr) spec.keyAr = await translateText(spec.key);
+            if (spec.value && !spec.valueAr) spec.valueAr = await translateText(spec.value);
+          }
+        }
+
+        // Barcode and GTIN are unique across the catalogue. A sheet that repeats
+        // one -- a supplier placeholder, or the same code pasted down a column --
+        // used to abort the entire row on a duplicate key error, throwing away
+        // every other edit in it. The clashing code is dropped instead and
+        // reported, so the rest of the update still lands.
+        const rowNotices = []
+
+        const claimUniqueCode = async (field, rawValue) => {
+          const value = normalizeOptionalUniqueField(rawValue)
+          if (!value) return undefined
+
+          const owner = await Product.findOne({ [field]: value }).select("_id name").lean()
+          if (!owner || (existing && String(owner._id) === String(existing._id))) return value
+
+          rowNotices.push(
+            `${field === "gtin" ? "GTIN" : "Barcode"} ${value} already belongs to "${owner.name}" — ` +
+              (existing?.[field] ? `kept the existing ${field}.` : `saved without a ${field}.`),
+          )
+          return existing?.[field] || undefined
+        }
+
+        const resolvedBarcode = await claimUniqueCode("barcode", prod.barcode)
+        const resolvedGtin = await claimUniqueCode("gtin", prod.gtin)
+
+        const productData = {
+          name: prod.name || "",
+          nameAr,
+          slug: prod.slug || generateSlug(prod.name || ""),
+          sku: (prod.sku && prod.sku.trim() !== "") ? prod.sku.trim() : undefined,
+          barcode: resolvedBarcode,
+          ...(prod.gtin !== undefined ? { gtin: resolvedGtin } : {}),
+          parentCategory: parentCategoryId, // Main category
+          category: categoryId, // Level 1
+          subCategory: categoryId, // Backward compatibility
+          subCategory2: subCategory2Id,
+          subCategory3: subCategory3Id,
+          subCategory4: subCategory4Id,
+          brand: brandId,
+          buyingPrice: prod.buyingPrice || 0,
+          wholesalePrice: parseOptionalPrice(prod.wholesalePrice),
+          price,
+          offerPrice,
+          discount,
+          tax: taxId,
+          stockStatus,
+          stockStatusAr,
+          showStockOut: prod.showStockOut !== undefined ? Boolean(prod.showStockOut) : true,
+          canPurchase: prod.canPurchase !== undefined ? Boolean(prod.canPurchase) : true,
+          refundable: prod.refundable !== undefined ? Boolean(prod.refundable) : true,
+          maxPurchaseQty: prod.maxPurchaseQty || 10,
+          lowStockWarning: prod.lowStockWarning || 5,
+          unit: unitId,
+          weight: prod.weight || 0,
+          tags: prod.tags || [],
+          tagsAr,
+          description: prod.description || "",
+          descriptionAr,
+          shortDescription: prod.shortDescription || "",
+          shortDescriptionAr,
+          specifications: parsedSpecifications,
+          countInStock: prod.countInStock !== undefined ? prod.countInStock : 0,
+          isActive: prod.isActive !== undefined ? Boolean(prod.isActive) : true,
+          featured: prod.featured !== undefined ? Boolean(prod.featured) : false,
+        }
+
+        let product
+
+        if (existing) {
+          // UPDATE existing product
+          Object.assign(existing, productData)
+          product = await existing.save()
+          console.log(`Product ${i} (${prod.name}): UPDATED`)
+          results.push({
+            index: i,
+            status: "success",
+            action: "updated",
+            product: product,
+            ...(rowNotices.length ? { notices: rowNotices } : {}),
+          })
+          updated++
+          success++
+        } else {
+          // CREATE new product
+          productData.createdBy = req.user._id
+          product = new Product(productData)
+          await product.save()
+          console.log(`Product ${i} (${prod.name}): CREATED`)
+          results.push({
+            index: i,
+            status: "success",
+            action: "created",
+            product: product,
+            ...(rowNotices.length ? { notices: rowNotices } : {}),
+          })
+          created++
+          success++
+        }
+      } catch (error) {
+        console.log(`Product ${i} (${prod.name}): FAILED - ${error.message}`)
+        results.push({ index: i, status: "failed", reason: error.message, product: prod })
+        failed++
+      }
+    }
+
+    console.log(`\n=== BULK SAVE SUMMARY ===`)
+    console.log(`Total: ${products.length}, Success: ${success}, Failed: ${failed}`)
+    console.log(`Created: ${created}, Updated: ${updated}`)
+    console.log(`========================\n`)
+
+    // Populate category, subcategory, and brand in the results
+    const populatedResults = await Promise.all(
+      results.map(async (result) => {
+        if (!result.product || result.status === "failed") return result
+
+        const prod = { ...result.product.toObject() }
+
+        if (prod.parentCategory) {
+          const cat = await Category.findById(prod.parentCategory).select("name slug")
+          if (cat) prod.parentCategory = { _id: cat._id, name: cat.name, slug: cat.slug }
+        }
+
+        if (prod.category) {
+          const sub = await SubCategory.findById(prod.category).select("name slug")
+          if (sub) prod.category = { _id: sub._id, name: sub.name, slug: sub.slug }
+        }
+
+        if (prod.brand) {
+          const brand = await Brand.findById(prod.brand).select("name slug")
+          if (brand) prod.brand = { _id: brand._id, name: brand.name, slug: brand.slug }
+        }
+
+        return { ...result, product: prod }
+      }),
+    )
+
+    // Invalidate cache after bulk create/update operations
+    await invalidateCache("products")
+
+    res.json({
+      message: `Bulk save complete: ${created} created, ${updated} updated, ${failed} failed`,
+      total: products.length,
+      success,
+      failed,
+      created,
+      updated,
+      results: populatedResults,
+      cacheHint: { productsUpdated: true, timestamp: Date.now() },
+    })
+  }),
+)
+
+// @desc    Bulk import products with ObjectId tracking (improved version)
+// @route   POST /api/products/bulk-import-with-id
+// @access  Private/Admin
+router.post(
+  "/bulk-import-with-id",
+  protect,
+  admin,
+  handleBulkImportUpload,
+  asyncHandler(async (req, res) => {
+    console.log("--- BULK IMPORT WITH OBJECTID START ---")
+
+    const excelFile = req.files?.file?.[0]
+    if (!excelFile) {
+      return res.status(400).json({ message: "No file uploaded" })
+    }
+
+    try {
+      // Read Excel from uploaded file
+      const workbook = XLSX.readFile(excelFile.path)
+      const sheetName = workbook.SheetNames[0]
+      const sheet = workbook.Sheets[sheetName]
+      const rows = XLSX.utils.sheet_to_json(sheet)
+      console.log("Excel rows loaded:", rows.length)
+
+      const uploadedImageFiles = Array.isArray(req.files?.images) ? req.files.images : []
+      const uploadedImageLookup = new Map()
+
+      for (const file of uploadedImageFiles) {
+        const fileUrl = toUploadUrl(file.path)
+        const lookupKeys = [
+          ...buildImageLookupKeys(file.originalname),
+          ...buildImageLookupKeys(file.filename),
+        ]
+
+        for (const key of lookupKeys) {
+          if (key && !uploadedImageLookup.has(key)) {
+            uploadedImageLookup.set(key, fileUrl)
+          }
+        }
+      }
+
+      const results = []
+      let created = 0
+      let updated = 0
+      let failed = 0
+      const errors = []
+
+      // Track ObjectIds in this batch to detect duplicates
+      const seenObjectIds = new Map()
+      const duplicateObjectIds = new Set()
+
+      // First pass: Detect duplicate ObjectIds within the Excel file
+      for (const [i, row] of rows.entries()) {
+        const rowNum = i + 2 // Excel row number (accounting for header)
+        const objectId = row._id || row.id || row.ID || row['_id']
+        
+        if (objectId && objectId.trim() !== '') {
+          const cleanId = objectId.trim()
+          
+          // Check if we've seen this ObjectId before in this file
+          if (seenObjectIds.has(cleanId)) {
+            duplicateObjectIds.add(cleanId)
+            errors.push({
+              row: rowNum,
+              productName: row.name || 'Unknown',
+              objectId: cleanId,
+              error: `Duplicate ObjectId found in Excel file. First occurrence at row ${seenObjectIds.get(cleanId)}`,
+            })
+          } else {
+            seenObjectIds.set(cleanId, rowNum)
+          }
+        }
+      }
+
+      // If we found any duplicate ObjectIds, return error
+      if (duplicateObjectIds.size > 0) {
+        return res.status(400).json({
+          message: `Found ${duplicateObjectIds.size} duplicate ObjectId(s) in the Excel file. Please fix these duplicates before importing.`,
+          duplicates: Array.from(duplicateObjectIds),
+          errors,
+          total: rows.length,
+          failed: errors.length,
+        })
+      }
+
+      // Helper to resolve category/brand by name only (no ID support)
+      const resolveCategoryOrBrand = async (Model, nameValue, createIfMissing = true, userId = null) => {
+        if (!nameValue) return null
+        
+        // Try by name
+        if (nameValue && nameValue.trim() !== '') {
+          const normalizedName = normalizeLookupValue(nameValue)
+          const nameMatcher = buildCaseInsensitiveExactRegex(normalizedName)
+          let found = nameMatcher ? await Model.findOne({ name: nameMatcher }) : null
+
+          if (!found) {
+            const slug = generateSlug(normalizedName)
+            found = await Model.findOne({ slug })
+          }
+
+          if (found) return found._id
+          
+          // Create new if requested
+          if (createIfMissing) {
+            const slug = generateSlug(normalizedName)
+            
+            // Translate name for Arabic field
+            const nameAr = await translateText(normalizedName);
+            
+            const newDoc = await Model.create({
+              name: normalizedName,
+              nameAr,
+              slug,
+              isActive: true,
+              createdBy: userId,
+            })
+            return newDoc._id
+          }
+        }
+        
+        return null
+      }
+
+      // Helper to resolve subcategory by name (with level support)
+      const resolveSubCategory = async (nameValue, parentCategoryId, parentSubId, level, userId = null) => {
+        const normalizedName = normalizeLookupValue(nameValue)
+        if (!normalizedName) return null
+
+        const nameMatcher = buildCaseInsensitiveExactRegex(normalizedName)
+        const scopedQuery = {
+          level,
+          category: parentCategoryId,
+          isDeleted: { $ne: true },
+          ...(level > 1 ? { parentSubCategory: parentSubId || null } : {}),
+        }
+
+        // Exact scoped lookup by name first.
+        let found = nameMatcher ? await SubCategory.findOne({ ...scopedQuery, name: nameMatcher }) : null
+
+        // Then scoped slug lookup.
+        if (!found) {
+          const slug = generateSlug(normalizedName)
+          found = await SubCategory.findOne({ ...scopedQuery, slug })
+        }
+
+        if (found) return found._id
+
+        // Create new subcategory
+        const slug = generateSlug(normalizedName)
+        const nameAr = await translateText(normalizedName)
+
+        const newSub = await SubCategory.create({
+          name: normalizedName,
+          nameAr,
+          slug,
+          category: parentCategoryId,
+          parentSubCategory: parentSubId || null,
+          level,
+          isActive: true,
+          createdBy: userId,
+        })
+        return newSub._id
+      }
+
+      // Second pass: Process products
+      for (const [i, row] of rows.entries()) {
+        const rowNum = i + 2
+        
+        try {
+          // Skip empty rows
+          if (Object.values(row).every((v) => !v || String(v).trim() === '')) {
+            continue
+          }
+
+          const objectId =
+            getBulkField(row, ["_id", "id"]) || row._id || row.id || row.ID || row["_id"]
+          const productName = getBulkField(row, ["name"]) || row.name
+          
+          if (!productName || productName.trim() === '') {
+            errors.push({
+              row: rowNum,
+              productName: 'Unknown',
+              error: 'Product name is required',
+            })
+            failed++
+            continue
+          }
+
+          let product = null
+          let isUpdate = false
+
+          // If ObjectId is provided, try to find existing product
+          if (objectId && objectId.trim() !== '' && mongoose.Types.ObjectId.isValid(objectId.trim())) {
+            product = await Product.findById(objectId.trim())
+            if (product) {
+              isUpdate = true
+            } else {
+              // ObjectId provided but product not found - treat as error
+              errors.push({
+                row: rowNum,
+                productName,
+                objectId: objectId.trim(),
+                error: 'Product with provided ObjectId not found in database',
+              })
+              failed++
+              continue
+            }
+          }
+
+          // Resolve parent category (by name only)
+          const parentCategoryName =
+            getBulkField(row, ["parent_category", "parentCategory"]) || row.parent_category || row.parentCategory
+          const parentCategoryId = await resolveCategoryOrBrand(Category, parentCategoryName, true, req.user._id)
+
+          if (!parentCategoryId) {
+            errors.push({
+              row: rowNum,
+              productName,
+              error: 'Parent category is required',
+            })
+            failed++
+            continue
+          }
+
+          // Resolve brand (by name only)
+          const brandName = getBulkField(row, ["brand"]) || row.brand
+          const brandId = await resolveCategoryOrBrand(Brand, brandName, true, req.user._id)
+
+          const level1Name =
+            getBulkField(row, ["category_level_1", "category1", "category", "subcategory", "sub_category"]) ||
+            row.category_level_1 ||
+            row.category
+          const hierarchy = coerceCategoryHierarchy(
+            getBulkField(row, ["category_level_2", "category2", "sub_category_2", "subcategory2", "subCategory2"]) ||
+              row.category_level_2,
+            getBulkField(row, ["category_level_3", "category3", "sub_category_3", "subcategory3", "subCategory3"]) ||
+              row.category_level_3,
+            getBulkField(row, ["category_level_4", "category4", "sub_category_4", "subcategory4", "subCategory4"]) ||
+              row.category_level_4,
+          )
+
+          // Resolve category levels (by name only)
+          const level1Id = await resolveSubCategory(
+            level1Name,
+            parentCategoryId,
+            null,
+            1,
+            req.user._id
+          )
+
+          const level2Id = await resolveSubCategory(
+            hierarchy.level2Name,
+            parentCategoryId,
+            level1Id,
+            2,
+            req.user._id
+          )
+
+          const level3Id = await resolveSubCategory(
+            hierarchy.level3Name,
+            parentCategoryId,
+            level2Id || level1Id,
+            3,
+            req.user._id
+          )
+
+          const level4Id = await resolveSubCategory(
+            hierarchy.level4Name,
+            parentCategoryId,
+            level3Id || level2Id || level1Id,
+            4,
+            req.user._id
+          )
+
+          const imageNamesFromSheet = parseImageNameList(
+            getBulkField(row, ["images", "image", "gallery_images", "galleryImages"]),
+          )
+          const resolvedImageUrls = []
+          const missingImageNames = []
+
+          for (const imageName of imageNamesFromSheet) {
+            const lookupKeys = buildImageLookupKeys(imageName)
+            const matchedUrl = lookupKeys.find((key) => uploadedImageLookup.has(key))
+            if (matchedUrl) {
+              resolvedImageUrls.push(uploadedImageLookup.get(matchedUrl))
+            } else {
+              missingImageNames.push(imageName)
+            }
+          }
+
+          if (missingImageNames.length > 0) {
+            errors.push({
+              row: rowNum,
+              productName,
+              error: `Image file(s) not uploaded: ${missingImageNames.join(", ")}`,
+            })
+            failed++
+            continue
+          }
+
+          // Prepare product data
+          const productData = {
+            name: productName.trim(),
+            slug: (getBulkField(row, ["slug"]) || row.slug || "").trim() || generateSlug(productName.trim()),
+            sku: normalizeOptionalUniqueField(getBulkField(row, ["sku"]) || row.sku),
+            barcode: normalizeOptionalUniqueField(getBulkField(row, ["barcode"]) || row.barcode),
+            parentCategory: parentCategoryId,
+            category: level1Id,
+            subCategory: level1Id, // for backward compatibility
+            subCategory2: level2Id,
+            subCategory3: level3Id,
+            subCategory4: level4Id,
+            brand: brandId,
+            buyingPrice: parseFloat(getBulkField(row, ["buyingPrice", "buying_price"]) || row.buyingPrice) || 0,
+            wholesalePrice: parseOptionalPrice(
+              getBulkField(row, ["wholesalePrice", "wholesale_price"]) ?? row.wholesalePrice,
+            ),
+            price: parseFloat(getBulkField(row, ["price", "selling_price"]) || row.price) || 0,
+            offerPrice: parseFloat(getBulkField(row, ["offerPrice", "offer_price"]) || row.offerPrice) || 0,
+            discount: parseFloat(getBulkField(row, ["discount"]) || row.discount) || 0,
+            stockStatus: getBulkField(row, ["stockStatus", "status"]) || row.stockStatus || "In Stock",
+            countInStock: parseInt(getBulkField(row, ["countInStock", "stock"]) || row.countInStock) || 0,
+            showStockOut:
+              (getBulkField(row, ["showStockOut", "show_stock_out"]) || row.showStockOut) === "true" ||
+              row.showStockOut === true,
+            canPurchase:
+              (getBulkField(row, ["canPurchase", "can_purchasable"]) || row.canPurchase) !== "false" &&
+              row.canPurchase !== false,
+            refundable: (getBulkField(row, ["refundable"]) || row.refundable) !== "false" && row.refundable !== false,
+            maxPurchaseQty: parseInt(getBulkField(row, ["maxPurchaseQty", "max_purchase_quantity"]) || row.maxPurchaseQty) || 10,
+            lowStockWarning: parseInt(getBulkField(row, ["lowStockWarning", "low_stock_warning"]) || row.lowStockWarning) || 5,
+            weight: parseFloat(getBulkField(row, ["weight"]) || row.weight) || 0,
+            tags: (getBulkField(row, ["tags"]) || row.tags)
+              ? String(getBulkField(row, ["tags"]) || row.tags)
+                  .split(",")
+                  .map((t) => t.trim())
+                  .filter(Boolean)
+              : [],
+            description: getBulkField(row, ["description"]) || row.description || "",
+            shortDescription: getBulkField(row, ["shortDescription", "short_description"]) || row.shortDescription || "",
+            specifications: parseSpecificationsInput(getBulkField(row, ["specifications"]) || row.specifications),
+            details: getBulkField(row, ["details"]) || row.details || "",
+            isActive: true,
+          }
+
+          if (resolvedImageUrls.length > 0) {
+            const uniqueImages = Array.from(new Set(resolvedImageUrls))
+            productData.image = uniqueImages[0]
+            productData.galleryImages = uniqueImages.slice(1)
+          }
+
+          // Translate product fields
+          const nameAr = await translateText(productData.name);
+          const descriptionAr = await translateText(productData.description || "");
+          const shortDescriptionAr = await translateText(productData.shortDescription || "");
+          const stockStatusAr = await translateText(productData.stockStatus);
+          
+          let tagsAr = [];
+          if (productData.tags && Array.isArray(productData.tags)) {
+            tagsAr = await Promise.all(productData.tags.map(t => translateText(t)));
+          }
+
+          if (productData.specifications && Array.isArray(productData.specifications)) {
+            for (const spec of productData.specifications) {
+              if (spec.key && !spec.keyAr) spec.keyAr = await translateText(spec.key)
+              if (spec.value && !spec.valueAr) spec.valueAr = await translateText(spec.value)
+            }
+          }
+
+          Object.assign(productData, {
+            nameAr,
+            descriptionAr,
+            shortDescriptionAr,
+            stockStatusAr,
+            tagsAr
+          })
+
+          if (isUpdate) {
+            // UPDATE existing product
+            Object.assign(product, productData)
+            await product.save()
+            
+            results.push({
+              row: rowNum,
+              action: 'updated',
+              productId: product._id,
+              productName: product.name,
+              sku: product.sku,
+            })
+            updated++
+          } else {
+            // CREATE new product (no ObjectId provided)
+            productData.createdBy = req.user._id
+            
+            // Check for duplicate SKU/barcode/slug before creating
+            if (productData.sku) {
+              const existingBySku = await Product.findOne({ sku: productData.sku })
+              if (existingBySku) {
+                errors.push({
+                  row: rowNum,
+                  productName,
+                  error: `Product with SKU '${productData.sku}' already exists`,
+                })
+                failed++
+                continue
+              }
+            }
+
+            const newProduct = await Product.create(productData)
+            
+            results.push({
+              row: rowNum,
+              action: 'created',
+              productId: newProduct._id,
+              productName: newProduct.name,
+              sku: newProduct.sku,
+            })
+            created++
+          }
+        } catch (error) {
+          console.error(`Error processing row ${rowNum}:`, error)
+          errors.push({
+            row: rowNum,
+            productName: row.name || 'Unknown',
+            error: error.message,
+          })
+          failed++
+        }
+      }
+
+      console.log(`\n=== BULK IMPORT SUMMARY ===`)
+      console.log(`Total rows: ${rows.length}`)
+      console.log(`Created: ${created}`)
+      console.log(`Updated: ${updated}`)
+      console.log(`Failed: ${failed}`)
+      console.log(`==========================\n`)
+
+      // Invalidate cache after bulk import operations
+      await invalidateCache("products")
+
+      res.json({
+        message: `Bulk import complete: ${created} created, ${updated} updated, ${failed} failed`,
+        total: rows.length,
+        created,
+        updated,
+        failed,
+        uploadedImages: uploadedImageFiles.length,
+        results,
+        errors,
+      })
+    } catch (error) {
+      console.error("Bulk import error:", error)
+      res.status(500).json({
+        message: "Bulk import failed",
+        error: error.message,
+      })
+    } finally {
+      if (excelFile?.path) {
+        fs.unlink(excelFile.path, () => {})
+      }
+    }
+  }),
+)
+
+// @desc    Bulk create products
+// @route   POST /api/products/bulk
+// @access  Private/Admin
+router.post(
+  "/bulk",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const { products } = req.body
+
+    if (!products || !Array.isArray(products) || products.length === 0) {
+      res.status(400)
+      throw new Error("No products provided")
+    }
+
+    const results = []
+    let successCount = 0
+    let failedCount = 0
+
+    for (let i = 0; i < products.length; i++) {
+      const productData = products[i]
+
+      try {
+        // Find or create parent category
+        let parentCategory = null
+        if (productData.parentCategory) {
+          const parentCategoryStr = String(productData.parentCategory).trim()
+
+          if (mongoose.Types.ObjectId.isValid(parentCategoryStr)) {
+            parentCategory = await Category.findById(parentCategoryStr)
+          } else {
+            parentCategory = await Category.findOne({
+              name: parentCategoryStr,
+              isDeleted: { $ne: true },
+            })
+
+            if (!parentCategory) {
+              const slug = parentCategoryStr
+                .toLowerCase()
+                .replace(/[^a-z0-9\s-]/g, "")
+                .replace(/\s+/g, "-")
+                .replace(/-+/g, "-")
+                .trim()
+
+              // Translate category fields
+              const parentNameAr = await translateText(parentCategoryStr);
+
+              parentCategory = new Category({
+                name: parentCategoryStr,
+                nameAr: parentNameAr,
+                slug: slug,
+                isActive: true,
+                createdBy: req.user._id,
+              })
+              await parentCategory.save()
+            }
+          }
+        }
+
+        // Find or create subcategory
+        let subCategory = null
+        if (productData.category) {
+          const categoryStr = String(productData.category).trim()
+
+          if (mongoose.Types.ObjectId.isValid(categoryStr)) {
+            subCategory = await SubCategory.findById(categoryStr)
+          } else if (parentCategory) {
+            subCategory = await SubCategory.findOne({
+              name: categoryStr,
+              category: parentCategory._id,
+              isDeleted: { $ne: true },
+            })
+
+            if (!subCategory) {
+              const slug = categoryStr
+                .toLowerCase()
+                .replace(/[^a-z0-9\s-]/g, "")
+                .replace(/\s+/g, "-")
+                .replace(/-+/g, "-")
+                .trim()
+
+              // Translate subcategory fields
+              const subNameAr = await translateText(categoryStr);
+
+              subCategory = new SubCategory({
+                name: categoryStr,
+                nameAr: subNameAr,
+                slug: slug,
+                category: parentCategory._id,
+                isActive: true,
+                createdBy: req.user._id,
+              })
+              await subCategory.save()
+            }
+          }
+        }
+
+        // Find or create brand
+        let brand = null
+        if (productData.brand) {
+          const brandStr = String(productData.brand).trim()
+
+          if (mongoose.Types.ObjectId.isValid(brandStr)) {
+            brand = await Brand.findById(brandStr)
+          } else {
+            brand = await Brand.findOne({
+              name: brandStr,
+              isDeleted: { $ne: true },
+            })
+
+            if (!brand) {
+              const slug = brandStr
+                .toLowerCase()
+                .replace(/[^a-z0-9\s-]/g, "")
+                .replace(/\s+/g, "-")
+                .replace(/-+/g, "-")
+                .trim()
+
+              // Translate brand fields
+              const brandNameAr = await translateText(brandStr);
+
+              brand = new Brand({
+                name: brandStr,
+                nameAr: brandNameAr,
+                slug: slug,
+                isActive: true,
+                createdBy: req.user._id,
+              })
+              await brand.save()
+            }
+          }
+        }
+
+        // Handle tax - Find or create tax record
+        let tax = null
+        if (productData.tax) {
+          const taxStr = String(productData.tax).trim()
+
+          if (mongoose.Types.ObjectId.isValid(taxStr)) {
+            tax = await Tax.findById(taxStr)
+          } else {
+            // Try to find existing tax by name
+            tax = await Tax.findOne({
+              name: taxStr,
+              isDeleted: { $ne: true },
+            })
+
+            if (!tax) {
+              // Create new tax record
+              tax = new Tax({
+                name: taxStr,
+                percentage: taxStr.includes("5") ? 5 : 0, // Extract percentage if possible
+                isActive: true,
+                createdBy: req.user._id,
+              })
+              await tax.save()
+            }
+          }
+        }
+
+        // Handle unit - Find or create unit record
+        let unit = null
+        if (productData.unit) {
+          const unitStr = String(productData.unit).trim()
+
+          if (mongoose.Types.ObjectId.isValid(unitStr)) {
+            unit = await Unit.findById(unitStr)
+          } else {
+            unit = await Unit.findOne({
+              name: unitStr,
+              isDeleted: { $ne: true },
+            })
+
+            if (!unit) {
+              unit = new Unit({
+                name: unitStr,
+                isActive: true,
+                createdBy: req.user._id,
+              })
+              await unit.save()
+            }
+          }
+        }
+
+        // Generate unique slug
+        const productName = String(productData.name || "").trim()
+        const baseSlug =
+          productData.slug ||
+          productName
+            .toLowerCase()
+            .replace(/[^a-z0-9\s-]/g, "")
+            .replace(/\s+/g, "-")
+            .replace(/-+/g, "-")
+            .trim()
+
+        // Ensure slug is unique
+        let productSlug = baseSlug
+        let counter = 1
+        while (await Product.findOne({ slug: productSlug })) {
+          productSlug = `${baseSlug}-${counter}`
+          counter++
+        }
+
+        // Check if product with same name, slug, SKU, or barcode already exists
+        const duplicateQuery = [
+          { name: productName },
+          { slug: productSlug }
+        ]
+        
+        // Only check SKU/barcode if they have values
+        const trimmedSKU = String(productData.sku || "").trim()
+        const trimmedBarcode = String(productData.barcode || "").trim()
+        
+        if (trimmedSKU !== "") {
+          duplicateQuery.push({ sku: trimmedSKU })
+        }
+        if (trimmedBarcode !== "") {
+          duplicateQuery.push({ barcode: trimmedBarcode })
+        }
+        
+        const existingProduct = await Product.findOne({ $or: duplicateQuery })
+        if (existingProduct) {
+          let reason = "Duplicate product"
+          if (existingProduct.name === productName) reason = "Duplicate product name"
+          else if (existingProduct.slug === productSlug) reason = "Duplicate product slug"
+          else if (existingProduct.sku === trimmedSKU) reason = `Duplicate SKU: ${trimmedSKU}`
+          else if (existingProduct.barcode === trimmedBarcode) reason = `Duplicate Barcode: ${trimmedBarcode}`
+          
+          results.push({
+            status: "error",
+            product: productData,
+            message: reason,
+            originalIndex: i,
+          })
+          failedCount++
+          continue
+        }
+
+        // Translate product fields
+        const nameAr = await translateText(productName);
+        const descriptionAr = await translateText(productData.description || "");
+        const shortDescriptionAr = await translateText(productData.shortDescription || "");
+        const stockStatusAr = await translateText(productData.stockStatus || "In Stock");
+        
+        let tagsAr = [];
+        if (productData.tags && Array.isArray(productData.tags)) {
+          tagsAr = await Promise.all(productData.tags.map(t => translateText(t)));
+        } else if (productData.tags && typeof productData.tags === 'string') {
+          const tagList = productData.tags.split(",").map(t => t.trim()).filter(Boolean);
+          tagsAr = await Promise.all(tagList.map(t => translateText(t)));
+        }
+
+        // Translate specifications (supports "Key: Value; Key: Value" format)
+        const specifications = parseSpecificationsInput(productData.specifications)
+        for (const spec of specifications) {
+          if (spec.key && !spec.keyAr) spec.keyAr = await translateText(spec.key)
+          if (spec.value && !spec.valueAr) spec.valueAr = await translateText(spec.value)
+        }
+
+        // Create the product with proper ObjectId references
+        const product = new Product({
+          name: productName,
+          nameAr,
+          slug: productSlug,
+          sku: trimmedSKU !== "" ? trimmedSKU : undefined,
+          parentCategory: parentCategory?._id,
+          category: subCategory?._id,
+          brand: brand?._id,
+          tax: tax?._id, // Use ObjectId reference
+          unit: unit?._id, // Use ObjectId reference
+          buyingPrice: Number(productData.buyingPrice) || 0,
+          wholesalePrice: parseOptionalPrice(productData.wholesalePrice),
+          price: Number(productData.price) || 0,
+          offerPrice: Number(productData.offerPrice) || 0,
+          stockStatus: String(productData.stockStatus || "In Stock").trim(),
+          stockStatusAr,
+          showStockOut: productData.showStockOut !== undefined ? Boolean(productData.showStockOut) : true,
+          canPurchase: productData.canPurchase !== undefined ? Boolean(productData.canPurchase) : true,
+          refundable: productData.refundable !== undefined ? Boolean(productData.refundable) : true,
+          maxPurchaseQty: Number(productData.maxPurchaseQty) || 10,
+          lowStockWarning: Number(productData.lowStockWarning) || 5,
+          weight: Number(productData.weight) || 0,
+          tags: productData.tags
+            ? String(productData.tags)
+                .split(",")
+                .map((tag) => tag.trim())
+                .filter((tag) => tag)
+            : [],
+          tagsAr,
+          description: String(productData.description || "").trim(),
+          descriptionAr,
+          discount: Number(productData.discount) || 0,
+          specifications,
+          details: String(productData.details || "").trim(),
+          shortDescription: String(productData.shortDescription || "").trim(),
+          shortDescriptionAr,
+          barcode: trimmedBarcode !== "" ? trimmedBarcode : undefined,
+          isActive: true,
+          countInStock: Number(productData.countInStock) || 0,
+          createdBy: req.user._id,
+        })
+
+        await product.save()
+
+        results.push({
+          status: "success",
+          product: {
+            _id: product._id,
+            name: product.name,
+            sku: product.sku,
+          },
+          originalIndex: i,
+        })
+        successCount++
+      } catch (error) {
+        console.error(`Error creating product ${i + 1}:`, error)
+        results.push({
+          status: "error",
+          product: productData,
+          message: error.message || "Failed to create product",
+          details: error.stack,
+          originalIndex: i,
+        })
+        failedCount++
+      }
+    }
+
+    // Invalidate cache after bulk product creation
+    await invalidateCache("products")
+
+    res.json({
+      success: true,
+      message: `Bulk import completed. ${successCount} products created, ${failedCount} failed.`,
+      successCount,
+      failedCount,
+      results,
+      summary: {
+        total: products.length,
+        success: successCount,
+        failed: failedCount,
+      },
+    })
+  }),
+)
+
+export default router

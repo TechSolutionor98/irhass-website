@@ -1,0 +1,1369 @@
+
+import express from "express"
+import asyncHandler from "express-async-handler"
+import { createHash } from "crypto"
+import Product from "../models/productModel.js"
+
+const router = express.Router()
+
+// Helper function to properly escape XML characters
+const escapeXml = (unsafe) => {
+  if (!unsafe) return ""
+  return unsafe
+    .toString()
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "") // Remove control characters
+    .replace(/[\uFFFE\uFFFF]/g, "") // Remove invalid Unicode
+    .replace(/[\u0000-\u001F]/g, "") // Remove more control chars
+}
+
+// Helper function to truncate title to Google's 150 character limit
+const truncateTitle = (title, maxLength = 150) => {
+  if (!title) return ""
+  // First clean the title of problematic characters
+  let cleanTitle = title
+    .toString()
+    .replace(/[""]/g, '"') // Normalize curly quotes to straight
+    .replace(/['']/g, "'") // Normalize curly apostrophes
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'") // More apostrophe variants
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"') // More quote variants
+    .replace(/"/g, " inch") // Replace " with inch for screen sizes
+    .replace(/'/g, "") // Remove remaining apostrophes
+    .replace(/[\x00-\x1F\x7F]/g, "") // Remove control characters
+    .replace(/\s+/g, " ") // Collapse multiple spaces
+    .trim()
+  
+  if (cleanTitle.length <= maxLength) return cleanTitle
+  // Try to cut at a word boundary
+  const truncated = cleanTitle.substring(0, maxLength - 3)
+  const lastSpace = truncated.lastIndexOf(' ')
+  if (lastSpace > maxLength - 30) {
+    return truncated.substring(0, lastSpace) + '...'
+  }
+  return truncated + '...'
+}
+
+// Helper function to truncate description. Google allows up to 5000 chars,
+// but 500-1000 is recommended and keeps feed generation/transfer much faster.
+const truncateDescription = (description, maxLength = 1000) => {
+  if (!description) return ""
+  const cleanDesc = description
+    .toString()
+    .replace(/<[^>]*>/g, "") // Remove HTML tags
+    .replace(/&nbsp;/g, " ") // Replace &nbsp;
+    .replace(/&amp;/g, "&") // Decode &amp;
+    .replace(/&lt;/g, "<") // Decode &lt;
+    .replace(/&gt;/g, ">") // Decode &gt;
+    .replace(/&quot;/g, '"') // Decode &quot;
+    .replace(/&#39;/g, "'") // Decode &#39;
+    .replace(/[""]/g, '"') // Normalize curly quotes
+    .replace(/['']/g, "'") // Normalize curly apostrophes
+    .replace(/\r\n|\r|\n/g, " ") // Replace newlines
+    .replace(/\t/g, " ") // Replace tabs
+    .replace(/\s+/g, " ") // Replace multiple spaces
+    .trim()
+  if (cleanDesc.length <= maxLength) return cleanDesc
+  return cleanDesc.substring(0, maxLength - 3) + '...'
+}
+
+// Helper function to clean text for CDATA - removes problematic characters
+const cleanForCDATA = (text) => {
+  if (!text) return ""
+  return text
+    .toString()
+    .replace(/]]>/g, "] ]>") // Break up CDATA end sequence
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "") // Remove control characters
+    .replace(/[\uFFFE\uFFFF]/g, "") // Remove invalid Unicode
+    .replace(/\u0000/g, "") // Remove null chars
+    .replace(/[""]/g, '"') // Normalize curly quotes to straight quotes
+    .replace(/['']/g, "'") // Normalize curly apostrophes
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'") // More apostrophe variants
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"') // More quote variants
+    .replace(/\r\n/g, " ") // Replace Windows newlines
+    .replace(/\r/g, " ") // Replace Mac newlines  
+    .replace(/\n/g, " ") // Replace Unix newlines
+    .replace(/\t/g, " ") // Replace tabs
+    .replace(/\s+/g, " ") // Collapse multiple spaces
+    .trim()
+}
+
+// Helper function to determine availability
+const determineAvailability = (product) => {
+  // Check stock status first
+  if (product.stockStatus === "Out of Stock") {
+    return "out_of_stock"
+  }
+
+  if (product.stockStatus === "PreOrder") {
+    return "preorder"
+  }
+
+  // If stockStatus is "In Stock" or any other value, check actual stock count
+  if (product.countInStock && product.countInStock > 0) {
+    return "in_stock"
+  }
+
+  // If no stock count or zero stock, but stockStatus is not explicitly "Out of Stock"
+  if (product.stockStatus === "In Stock") {
+    return "in_stock" // Trust the stockStatus over countInStock
+  }
+
+  // Default to out of stock
+  return "out_of_stock"
+}
+
+const trackAvailability = (stats, availability) => {
+  if (availability === "in_stock") stats.inStock++
+  else if (availability === "out_of_stock") stats.outOfStock++
+  else if (availability === "preorder") stats.preOrder++
+}
+
+const GOOGLE_MERCHANT_ID_MAX_LENGTH = 50
+
+const sanitizeFeedId = (value) =>
+  String(value || "")
+    .normalize("NFKD")
+    .replace(/[^\x00-\x7F]/g, "")
+    .replace(/[^A-Za-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .trim()
+
+const buildShortStableFeedId = (value, fallbackSeed) => {
+  const sanitized = sanitizeFeedId(value)
+  if (sanitized && sanitized.length <= GOOGLE_MERCHANT_ID_MAX_LENGTH) {
+    return sanitized
+  }
+
+  const hash = createHash("sha1")
+    .update(String(value || fallbackSeed || ""))
+    .digest("hex")
+    .slice(0, 12)
+
+  const base = sanitized || sanitizeFeedId(fallbackSeed) || "item"
+  const headLength = GOOGLE_MERCHANT_ID_MAX_LENGTH - hash.length - 1
+  const head = headLength > 0 ? base.slice(0, headLength) : "item"
+  return `${head}-${hash}`.slice(0, GOOGLE_MERCHANT_ID_MAX_LENGTH)
+}
+
+const getProductFeedId = (product) => {
+  const mongoId = String(product?._id || "")
+  const sku = String(product?.sku || "").trim()
+
+  const base = (sku || mongoId).toString().trim()
+  return base
+    .normalize("NFKD")
+    .replace(/[^\x00-\x7F]/g, "")
+    .replace(/[^A-Za-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase()
+}
+
+const getItemGroupId = (product) => {
+  const hasColorVars = Array.isArray(product?.colorVariations) && product.colorVariations.length > 0
+  const hasDosVars = Array.isArray(product?.dosVariations) && product.dosVariations.length > 0
+  
+  if (!hasColorVars && !hasDosVars) return ""
+
+  return getProductFeedId(product)
+}
+
+// Helper function to determine Google product category
+function determineGoogleCategory(parentCategory, subCategory) {
+  const categoryMappings = {
+    Electronics: "Electronics",
+    Computers: "Electronics > Computers",
+    Mobile: "Electronics > Communications > Telephony > Mobile Phones",
+    Laptops: "Electronics > Computers > Laptops",
+    Gaming: "Electronics > Video Game Console Accessories",
+    Audio: "Electronics > Audio",
+    Cameras: "Electronics > Cameras & Optics",
+    Home: "Home & Garden",
+    Kitchen: "Home & Garden > Kitchen & Dining",
+    Furniture: "Home & Garden > Furniture",
+    Clothing: "Apparel & Accessories",
+    Fashion: "Apparel & Accessories",
+    Shoes: "Apparel & Accessories > Shoes",
+    Bags: "Apparel & Accessories > Handbags, Wallets & Cases",
+    Beauty: "Health & Beauty > Personal Care",
+    Health: "Health & Beauty",
+    Sports: "Sporting Goods",
+    Fitness: "Sporting Goods > Exercise & Fitness",
+    Toys: "Toys & Games",
+    Books: "Media > Books",
+    Automotive: "Vehicles & Parts > Vehicle Parts & Accessories",
+    Tools: "Hardware > Tools",
+    Garden: "Home & Garden > Lawn & Garden",
+    Pet: "Animals & Pet Supplies",
+    Baby: "Baby & Toddler > Baby Care",
+    Office: "Business & Industrial > Office Supplies",
+  }
+
+  const searchKey = subCategory || parentCategory || ""
+
+  if (categoryMappings[searchKey]) {
+    return categoryMappings[searchKey]
+  }
+
+  for (const [key, value] of Object.entries(categoryMappings)) {
+    if (searchKey.toLowerCase().includes(key.toLowerCase()) || key.toLowerCase().includes(searchKey.toLowerCase())) {
+      return value
+    }
+  }
+
+  return "Electronics"
+}
+
+const BASE_WEBSITE_URL = "https://www.irhaas.com"
+const BASE_API_URL = "https://api.irhaas.com"
+
+const normalizeAbsoluteUrl = (value, { forUploads = false } = {}) => {
+  const raw = String(value || "")
+    .replace(/[\u0000-\u001F\u007F]/g, "")
+    .trim()
+  if (!raw) return ""
+
+  let resolved = raw
+  if (resolved.startsWith("//")) {
+    resolved = `https:${resolved}`
+  } else if (!/^https?:\/\//i.test(resolved)) {
+    const normalizedPath = resolved.startsWith("/") ? resolved : `/${resolved}`
+    resolved = `${forUploads ? BASE_API_URL : BASE_WEBSITE_URL}${normalizedPath}`
+  }
+
+  resolved = resolved
+    .replace(/^http:\/\//i, "https://")
+    .replace(/([^:])\/{2,}/g, "$1/")
+    .replace("https://www.irhaas.com/uploads/", "https://api.irhaas.com/uploads/")
+
+  try {
+    const urlObj = new URL(resolved)
+    const encodedPath = urlObj.pathname
+      .split("/")
+      .map((segment) => {
+        if (!segment) return ""
+        try {
+          return encodeURIComponent(decodeURIComponent(segment))
+        } catch {
+          return encodeURIComponent(segment)
+        }
+      })
+      .join("/")
+    urlObj.pathname = encodedPath
+    return urlObj.toString()
+  } catch {
+    return encodeURI(resolved)
+  }
+}
+
+// Helper to normalize image URLs for feed compatibility.
+const fixImageUrl = (url) => normalizeAbsoluteUrl(url, { forUploads: true })
+
+const normalizePriceValue = (value) => {
+  if (value === null || value === undefined) return null
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null
+  }
+
+  const normalized = String(value).replace(/,/g, "").trim()
+  if (!normalized) return null
+
+  const parsed = Number.parseFloat(normalized)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const getEffectivePriceFromPair = (basePrice, offerPrice) => {
+  const validBasePrice = basePrice !== null && basePrice > 0 ? basePrice : null
+  const validOfferPrice = offerPrice !== null && offerPrice > 0 ? offerPrice : null
+
+  if (validBasePrice !== null && validOfferPrice !== null) {
+    if (validOfferPrice < validBasePrice) {
+      return { price: validBasePrice, salePrice: validOfferPrice }
+    }
+    return { price: validBasePrice, salePrice: null }
+  }
+
+  if (validBasePrice !== null) return { price: validBasePrice, salePrice: null }
+  if (validOfferPrice !== null) return { price: validOfferPrice, salePrice: null }
+  return { price: null, salePrice: null }
+}
+
+const getBestVariationPrice = (variations) => {
+  if (!Array.isArray(variations) || variations.length === 0) return { price: null, salePrice: null }
+
+  let best = { price: null, salePrice: null }
+  for (const variation of variations) {
+    const current = getEffectivePriceFromPair(
+      normalizePriceValue(variation?.price),
+      normalizePriceValue(variation?.offerPrice),
+    )
+
+    if (current.price === null) continue
+    if (best.price === null || current.price < best.price) {
+      best = current
+    }
+  }
+
+  return best
+}
+
+const getEffectiveFeedPrice = (product, includeZeroPrice = false) => {
+  const directPrice = getEffectivePriceFromPair(
+    normalizePriceValue(product?.price),
+    normalizePriceValue(product?.offerPrice),
+  )
+  if (directPrice.price !== null) return directPrice
+
+  const colorVariationPrice = getBestVariationPrice(product?.colorVariations)
+  if (colorVariationPrice.price !== null) return colorVariationPrice
+
+  const dosVariationPrice = getBestVariationPrice(product?.dosVariations)
+  if (dosVariationPrice.price !== null) return dosVariationPrice
+
+  if (includeZeroPrice) {
+    return { price: 1, salePrice: null }
+  }
+
+  return { price: null, salePrice: null }
+}
+
+const FEED_PRICE_MATCH = {
+  $or: [
+    { price: { $gt: 0 } },
+    { offerPrice: { $gt: 0 } },
+    { "colorVariations.price": { $gt: 0 } },
+    { "colorVariations.offerPrice": { $gt: 0 } },
+    { "dosVariations.price": { $gt: 0 } },
+    { "dosVariations.offerPrice": { $gt: 0 } },
+  ],
+}
+
+const resolveFeedLanguage = (req) => {
+  const rawLang = String(req.query.lang || "en").toLowerCase()
+  return rawLang === "ar" ? "ar" : "en"
+}
+
+// Storefront URLs have no locale prefix; `lang` is kept so the feed's call sites
+// keep working and can reintroduce per-language links later.
+const buildProductUrl = (slug, _lang = "en") => {
+  const safeSlug = encodeURIComponent(String(slug || "").trim())
+  return `${BASE_WEBSITE_URL}/product/${safeSlug}`
+}
+
+const getPreorderAvailabilityDate = (product) => {
+  const candidates = [
+    product?.availabilityDate,
+    product?.preorderDate,
+    product?.preOrderDate,
+    product?.expectedAvailabilityDate,
+    product?.availableOn,
+  ]
+
+  for (const candidate of candidates) {
+    if (!candidate) continue
+    const parsed = new Date(candidate)
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString()
+  }
+
+  const fallbackDays = Number.parseInt(process.env.GMC_PREORDER_FALLBACK_DAYS || "7", 10)
+  const days = Number.isFinite(fallbackDays) && fallbackDays > 0 ? fallbackDays : 7
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
+}
+
+const parseFeedPagination = (req) => {
+  // To prevent accidental truncation in Merchant Center scheduled URL, pagination is opt-in.
+  const paginate = req.query.paginate === "true"
+  if (!paginate) {
+    return { page: 1, limit: 0, skip: 0, paginate: false }
+  }
+
+  const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1)
+  const rawLimit = Number.parseInt(req.query.limit, 10) || 0
+  const limit = Math.min(50000, Math.max(0, rawLimit))
+  const skip = limit > 0 ? (page - 1) * limit : 0
+
+  return { page, limit, skip, paginate: true }
+}
+
+const getLocalizedValue = (doc, field, lang = "en") => {
+  if (!doc) return ""
+  if (lang !== "ar") return doc[field] || ""
+  const arabicField = `${field}Ar`
+  return doc[arabicField] || doc[field] || ""
+}
+
+const GMC_XML_CACHE_TTL_MS = Number(process.env.GMC_XML_CACHE_TTL_MS || 15 * 60 * 1000)
+const gmcXmlFeedCache = new Map()
+
+const getXmlFeedCache = (key) => {
+  const cached = gmcXmlFeedCache.get(key)
+  if (!cached) return null
+  if (cached.expiresAt < Date.now()) {
+    gmcXmlFeedCache.delete(key)
+    return null
+  }
+  return cached.xml
+}
+
+const setXmlFeedCache = (key, xml) => {
+  gmcXmlFeedCache.set(key, {
+    xml,
+    expiresAt: Date.now() + GMC_XML_CACHE_TTL_MS,
+  })
+}
+
+// @desc    Get product count for debugging
+// @route   GET /api/google-merchant/count
+// @access  Public
+router.get(
+  "/count",
+  asyncHandler(async (req, res) => {
+    try {
+      const totalProducts = await Product.countDocuments()
+      const activeProducts = await Product.countDocuments({ isActive: true })
+      const inactiveProducts = await Product.countDocuments({ isActive: false })
+      const productsWithoutIsActive = await Product.countDocuments({ isActive: { $exists: false } })
+      const productsWithPrice = await Product.countDocuments({ price: { $gt: 0 } })
+      const productsWithZeroPrice = await Product.countDocuments({ price: 0 })
+      const productsWithOfferPrice = await Product.countDocuments({ offerPrice: { $gt: 0 } })
+      const productsWithName = await Product.countDocuments({ name: { $exists: true, $ne: "" } })
+      const productsWithoutName = await Product.countDocuments({ $or: [{ name: { $exists: false } }, { name: "" }] })
+
+      // Stock status analysis
+      const availableProducts = await Product.countDocuments({ stockStatus: "In Stock" })
+      const outOfStockProducts = await Product.countDocuments({ stockStatus: "Out of Stock" })
+      const preOrderProducts = await Product.countDocuments({ stockStatus: "PreOrder" })
+      const productsWithStock = await Product.countDocuments({ countInStock: { $gt: 0 } })
+      const productsWithZeroStock = await Product.countDocuments({ countInStock: 0 })
+
+      // Test the same query we use in the feed
+      const feedQuery = {
+        $or: [{ isActive: true }, { isActive: { $exists: false } }],
+      }
+      const feedProducts = await Product.countDocuments(feedQuery)
+      const feedProductsWithPrice = await Product.countDocuments({
+        ...feedQuery,
+        ...FEED_PRICE_MATCH,
+      })
+
+      // Test products that would be skipped in old logic
+      const productsWithValidName = await Product.countDocuments({
+        ...feedQuery,
+        name: { $exists: true, $ne: "" },
+      })
+
+      res.json({
+        total: totalProducts,
+        active: activeProducts,
+        inactive: inactiveProducts,
+        withoutIsActiveField: productsWithoutIsActive,
+        withPrice: productsWithPrice,
+        withZeroPrice: productsWithZeroPrice,
+        withOfferPrice: productsWithOfferPrice,
+        withName: productsWithName,
+        withoutName: productsWithoutName,
+        stockStatus: {
+          available: availableProducts,
+          outOfStock: outOfStockProducts,
+          preOrder: preOrderProducts,
+          withStock: productsWithStock,
+          withZeroStock: productsWithZeroStock,
+        },
+        feedQuery: feedProducts,
+        feedQueryWithPrice: feedProductsWithPrice,
+        feedQueryWithValidName: productsWithValidName,
+        query: req.query,
+      })
+    } catch (error) {
+      console.error("Product count error:", error)
+      res.status(500).json({ error: error.message })
+    }
+  }),
+)
+
+// @desc    Generate Google Merchant JSON Feed with pagination support
+// @route   GET /api/google-merchant/feed.json
+// @access  Public
+router.get(
+  "/feed.json",
+  asyncHandler(async (req, res) => {
+    try {
+      const { page, limit, skip, paginate } = parseFeedPagination(req)
+      const includeZeroPrice = req.query.includeZeroPrice === "true"
+      const includeOutOfStock = req.query.includeOutOfStock !== "false" // Default true
+      const feedLanguage = resolveFeedLanguage(req)
+
+      // Build query - include products that are active AND have valid data for Google
+      const query = {
+        name: { $exists: true, $ne: '' },
+        image: { $exists: true, $ne: '' },
+      }
+
+      // Filter out zero-price products unless explicitly included
+      if (!includeZeroPrice) {
+        query.$and = [
+          { $or: [{ isActive: true }, { isActive: { $exists: false } }] },
+          FEED_PRICE_MATCH,
+        ]
+      } else {
+        query.$or = [{ isActive: true }, { isActive: { $exists: false } }]
+      }
+
+      console.log("Fetching products with query:", JSON.stringify(query))
+      console.log(`Pagination: paginate=${paginate}, page=${page}, limit=${limit}, skip=${skip}`)
+
+      // Get total count first
+      const totalCount = await Product.countDocuments(query)
+      console.log(`Total products matching query: ${totalCount}`)
+
+      let dbQuery = Product.find(query)
+        .select(
+          "name nameAr slug sku gtin brand category parentCategory price offerPrice colorVariations dosVariations stockStatus countInStock isActive image galleryImages variations description descriptionAr shortDescription shortDescriptionAr featured tags createdAt updatedAt weight availabilityDate preorderDate preOrderDate expectedAvailabilityDate availableOn",
+        )
+        .populate({ path: 'brand', select: 'name nameAr' })
+        .populate({ path: 'category', select: 'name nameAr' })
+        .populate({ path: 'parentCategory', select: 'name nameAr' })
+        .sort({ _id: 1 })
+        .lean()
+      if (limit > 0) {
+        dbQuery = dbQuery.skip(skip).limit(limit)
+      }
+      const products = await dbQuery
+
+      console.log(`Found ${products.length} products`)
+
+      res.set({
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "public, max-age=3600",
+      })
+
+      const feed = {
+        title: "Irhaas Products",
+        link: "https://www.irhaas.com",
+        description: "Irhaas Product Feed for Google Merchant Center",
+        language: feedLanguage,
+        lastBuildDate: new Date().toISOString(),
+        totalProducts: totalCount,
+        returnedProducts: products.length,
+        pagination: {
+          page: page,
+          limit: limit,
+          skip: skip,
+          hasNextPage: limit > 0 ? skip + products.length < totalCount : false,
+          totalPages: limit > 0 ? Math.ceil(totalCount / limit) : 1,
+        },
+        products: [],
+      }
+
+      let processedCount = 0
+      let skippedCount = 0
+      const availabilityStats = {
+        inStock: 0,
+        outOfStock: 0,
+        preOrder: 0,
+      }
+
+      for (const product of products) {
+        try {
+          // Only skip products without a name
+          if (!product.name || product.name.trim() === "") {
+            console.log(`Skipping product ${product._id} - missing name`)
+            skippedCount++
+            continue
+          }
+
+          const productUrl = buildProductUrl(product.slug || product._id.toString(), feedLanguage)
+          const imageUrl = fixImageUrl(product.image || `${BASE_API_URL}/placeholder.jpg`)
+
+          // Use the improved availability logic
+          const availability = determineAvailability(product)
+          trackAvailability(availabilityStats, availability)
+          if (!includeOutOfStock && availability === "out_of_stock") {
+            skippedCount++
+            continue
+          }
+
+          // Handle pricing
+          const { price, salePrice } = getEffectiveFeedPrice(product, includeZeroPrice)
+          if (price === null) {
+            skippedCount++
+            continue
+          }
+
+          const localizedName = getLocalizedValue(product, "name", feedLanguage) || product.name
+          const localizedDescription = getLocalizedValue(product, "description", feedLanguage)
+            || getLocalizedValue(product, "shortDescription", feedLanguage)
+            || product.description
+            || product.shortDescription
+            || localizedName
+            || "No description available"
+          const cleanDescription = truncateDescription(localizedDescription)
+
+          // Truncate title to Google's 150 character limit
+          const truncatedTitle = truncateTitle(localizedName)
+
+          const parentCategoryName = getLocalizedValue(product.parentCategory, "name", feedLanguage) || product.parentCategory?.name
+          const categoryName = getLocalizedValue(product.category, "name", feedLanguage) || product.category?.name
+          const googleProductCategory = determineGoogleCategory(parentCategoryName, categoryName)
+          const productType =
+            (parentCategoryName || "Uncategorized") +
+            (categoryName ? ` > ${categoryName}` : "")
+
+          const additionalImages = []
+          if (product.galleryImages && product.galleryImages.length > 0) {
+            product.galleryImages.slice(0, 10).forEach((img) => {
+              if (img) {
+                const additionalImageUrl = fixImageUrl(img)
+                additionalImages.push(additionalImageUrl)
+              }
+            })
+          }
+
+          // Check if product has valid identifiers (GTIN or brand+MPN)
+          const hasGtin = product.gtin && product.gtin.trim() !== ''
+          const hasMpn = product.sku && product.sku.trim() !== ''
+          const hasBrand = product.brand?.name && product.brand.name.toLowerCase() !== 'generic'
+          const identifierExists = hasGtin || (hasBrand && hasMpn)
+
+          const productId = getProductFeedId(product)
+          const itemGroupId = getItemGroupId(product)
+          
+          const productData = {
+            id: productId,
+            title: truncatedTitle,
+            description: cleanDescription,
+            link: productUrl,
+            image_link: imageUrl,
+            additional_image_links: additionalImages,
+            price: `${price.toFixed(2)} PKR`,
+            availability: availability,
+            condition: "new",
+            google_product_category: googleProductCategory,
+            product_type: productType,
+            brand: getLocalizedValue(product.brand, "name", feedLanguage) || product.brand?.name || "Generic",
+            gtin: hasGtin ? product.gtin : "",
+            mpn: hasMpn ? product.sku : product._id.toString(),
+            identifier_exists: identifierExists ? "yes" : "no",
+            shipping_weight: product.weight ? `${product.weight} kg` : "",
+            shipping: {
+              country: "AE",
+              service: "Standard Shipping",
+              price: "0.00 PKR"
+            },
+            custom_labels: {
+              custom_label_0: product.featured ? "Featured" : "",
+              custom_label_1: product.tags && product.tags.length > 0 ? product.tags.slice(0, 3).join(", ") : "",
+              custom_label_2: parentCategoryName || "",
+              custom_label_3: availability,
+            },
+            stock_quantity: product.countInStock || 0,
+            stock_status: product.stockStatus || "Unknown",
+            created_at: product.createdAt,
+            updated_at: product.updatedAt,
+            is_active: product.isActive !== undefined ? product.isActive : true,
+            original_price: product.price || 0,
+            original_offer_price: product.offerPrice || 0,
+          }
+
+          if (itemGroupId) {
+            productData.item_group_id = itemGroupId
+          }
+
+          if (salePrice) {
+            productData.sale_price = `${salePrice.toFixed(2)} PKR`
+          }
+
+          if (availability === "preorder") {
+            productData.availability_date = getPreorderAvailabilityDate(product)
+          }
+
+          feed.products.push(productData)
+          processedCount++
+        } catch (productError) {
+          console.error(`Error processing product ${product._id}:`, productError)
+          skippedCount++
+          continue
+        }
+      }
+
+      feed.processedProducts = processedCount
+      feed.skippedProducts = skippedCount
+      feed.availabilityStats = availabilityStats
+
+      console.log(`Feed generated: ${processedCount} products processed, ${skippedCount} skipped`)
+      console.log(`Availability stats:`, availabilityStats)
+
+      res.json(feed)
+    } catch (error) {
+      console.error("Google Merchant JSON feed error:", error)
+      res.status(500).json({
+        error: "Error generating product feed",
+        message: error.message,
+        stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
+      })
+    }
+  }),
+)
+
+// @desc    Generate Google Merchant XML Feed
+// @route   GET /api/google-merchant/feed.xml
+// @access  Public
+router.get(
+  "/feed.xml",
+  asyncHandler(async (req, res) => {
+    try {
+      const { page, limit, skip, paginate } = parseFeedPagination(req)
+      const includeZeroPrice = req.query.includeZeroPrice === "true"
+      const feedLanguage = resolveFeedLanguage(req)
+      const xmlCacheKey = JSON.stringify({
+        route: "feed.xml",
+        page,
+        limit,
+        skip,
+        paginate,
+        includeZeroPrice,
+        feedLanguage,
+      })
+
+      const cachedXml = getXmlFeedCache(xmlCacheKey)
+      if (cachedXml) {
+        res.set({
+          "Content-Type": "application/xml; charset=utf-8",
+          "Cache-Control": "public, max-age=900",
+          "X-Feed-Cache": "HIT",
+        })
+        return res.send(cachedXml)
+      }
+
+      // Build query - include ALL active products
+      const query = {
+        name: { $exists: true, $ne: '' },
+        $or: [{ isActive: true }, { isActive: { $exists: false } }]
+      }
+
+      if (!includeZeroPrice) {
+        query.$and = [FEED_PRICE_MATCH]
+      }
+
+      console.log("Fetching products for XML with query:", JSON.stringify(query))
+      console.log(`XML Pagination: paginate=${paginate}, page=${page}, limit=${limit}, skip=${skip}`)
+
+      // Get total count first
+      const totalCount = await Product.countDocuments(query)
+      console.log(`Total products for XML: ${totalCount}`)
+
+      let dbQuery = Product.find(query)
+        .select(
+          "name nameAr slug sku gtin brand category parentCategory price offerPrice colorVariations dosVariations stockStatus countInStock isActive image galleryImages variations description descriptionAr shortDescription shortDescriptionAr featured tags weight availabilityDate preorderDate preOrderDate expectedAvailabilityDate availableOn",
+        )
+        .populate({ path: 'brand', select: 'name nameAr' })
+        .populate({ path: 'category', select: 'name nameAr' })
+        .populate({ path: 'parentCategory', select: 'name nameAr' })
+        .sort({ _id: 1 })
+        .lean()
+      if (limit > 0) {
+        dbQuery = dbQuery.skip(skip).limit(limit)
+      }
+      const products = await dbQuery
+
+      console.log(`Found ${products.length} products for XML`)
+
+      res.set({
+        "Content-Type": "application/xml; charset=utf-8",
+        "Cache-Control": "public, max-age=900",
+        "X-Feed-Cache": "MISS",
+      })
+
+      let xml = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">
+  <channel>
+    <title><![CDATA[Irhaas Products]]></title>
+    <link>https://www.irhaas.com</link>
+    <description><![CDATA[Irhaas Product Feed for Google Merchant Center - Total: ${totalCount} products]]></description>
+    <language>${feedLanguage}</language>
+    <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
+`
+
+      let processedCount = 0
+      const availabilityStats = {
+        inStock: 0,
+        outOfStock: 0,
+        preOrder: 0,
+      }
+
+      for (const product of products) {
+        try {
+          // Skip products without a name
+          if (!product.name || product.name.trim() === "") {
+            console.warn(`Skipping product ${product._id} - missing name`)
+            continue
+          }
+
+          const productUrl = buildProductUrl(product.slug || product._id.toString(), feedLanguage)
+          const imageUrl = fixImageUrl(product.image || `${BASE_API_URL}/placeholder.jpg`)
+
+          // Use the improved availability logic
+          const availability = determineAvailability(product)
+          trackAvailability(availabilityStats, availability)
+
+          // Handle pricing
+          const { price, salePrice } = getEffectiveFeedPrice(product, includeZeroPrice)
+          if (price === null) {
+            continue
+          }
+
+          // Clean and limit description
+          const localizedName = getLocalizedValue(product, "name", feedLanguage) || product.name
+          const localizedDescription = getLocalizedValue(product, "description", feedLanguage)
+            || getLocalizedValue(product, "shortDescription", feedLanguage)
+            || product.description
+            || product.shortDescription
+            || localizedName
+            || "No description available"
+          const cleanDescription = truncateDescription(localizedDescription)
+
+          // Truncate title to Google's 150 character limit
+          const truncatedTitle = truncateTitle(localizedName)
+
+          const parentCategoryName = getLocalizedValue(product.parentCategory, "name", feedLanguage) || product.parentCategory?.name
+          const categoryName = getLocalizedValue(product.category, "name", feedLanguage) || product.category?.name
+          const googleProductCategory = determineGoogleCategory(parentCategoryName, categoryName)
+          const productType =
+            (parentCategoryName || "Uncategorized") +
+            (categoryName ? ` > ${categoryName}` : "")
+
+          // Check if product has valid identifiers (GTIN or brand+MPN)
+          const hasGtin = product.gtin && product.gtin.trim() !== ''
+          const hasMpn = product.sku && product.sku.trim() !== ''
+          const hasBrand = product.brand?.name && product.brand.name.toLowerCase() !== 'generic'
+          const identifierExists = hasGtin || (hasBrand && hasMpn)
+
+          const productId = getProductFeedId(product)
+          const itemGroupId = getItemGroupId(product)
+
+          xml += `    <item>
+      <g:id>${escapeXml(productId)}</g:id>
+      <g:title><![CDATA[${cleanForCDATA(truncatedTitle)}]]></g:title>
+      <g:description><![CDATA[${cleanForCDATA(cleanDescription)}]]></g:description>
+      <g:link>${escapeXml(productUrl)}</g:link>
+      <g:image_link>${escapeXml(imageUrl)}</g:image_link>
+      <g:price>${price.toFixed(2)} PKR</g:price>`
+
+          if (salePrice) {
+            xml += `
+      <g:sale_price>${salePrice.toFixed(2)} PKR</g:sale_price>`
+          }
+
+          xml += `
+      <g:availability>${availability}</g:availability>
+      <g:condition>new</g:condition>`
+
+          const brandName = getLocalizedValue(product.brand, "name", feedLanguage) || product.brand?.name
+          if (brandName) {
+            xml += `
+      <g:brand><![CDATA[${cleanForCDATA(brandName)}]]></g:brand>`
+          } else {
+            xml += `
+      <g:brand><![CDATA[Generic]]></g:brand>`
+          }
+
+          if (product.gtin) {
+            xml += `
+      <g:gtin>${escapeXml(product.gtin)}</g:gtin>`
+          }
+
+          if (product.sku) {
+            xml += `
+      <g:mpn><![CDATA[${cleanForCDATA(product.sku)}]]></g:mpn>`
+          } else {
+            xml += `
+      <g:mpn><![CDATA[${cleanForCDATA(product._id.toString())}]]></g:mpn>`
+          }
+
+          // Add identifier_exists - required by Google
+          xml += `
+      <g:identifier_exists>${identifierExists ? 'yes' : 'no'}</g:identifier_exists>`
+
+          xml += `
+      <g:google_product_category><![CDATA[${googleProductCategory}]]></g:google_product_category>
+      <g:product_type><![CDATA[${cleanForCDATA(productType)}]]></g:product_type>`
+
+          if (itemGroupId) {
+            xml += `
+      <g:item_group_id>${escapeXml(itemGroupId)}</g:item_group_id>`
+          }
+
+          if (availability === "preorder") {
+            xml += `
+      <g:availability_date>${escapeXml(getPreorderAvailabilityDate(product))}</g:availability_date>`
+          }
+
+          // Add shipping information - required for UAE
+          xml += `
+      <g:shipping>
+        <g:country>AE</g:country>
+        <g:service>Standard Shipping</g:service>
+        <g:price>0.00 PKR</g:price>
+      </g:shipping>`
+
+          // Add additional images if available
+          if (product.galleryImages && product.galleryImages.length > 0) {
+            product.galleryImages.slice(0, 10).forEach((img) => {
+              if (img) {
+                const additionalImageUrl = fixImageUrl(img)
+                xml += `
+      <g:additional_image_link>${escapeXml(additionalImageUrl)}</g:additional_image_link>`
+              }
+            })
+          }
+
+          // Add weight if available
+          if (product.weight && product.weight > 0) {
+            xml += `
+      <g:shipping_weight>${product.weight} kg</g:shipping_weight>`
+          }
+
+          // Add custom labels for filtering
+          if (product.featured) {
+            xml += `
+      <g:custom_label_0>Featured</g:custom_label_0>`
+          }
+
+          if (product.tags && product.tags.length > 0) {
+            const tagsString = product.tags.slice(0, 3).join(", ")
+            xml += `
+      <g:custom_label_1><![CDATA[${cleanForCDATA(tagsString)}]]></g:custom_label_1>`
+          }
+
+          xml += `
+    </item>
+`
+          processedCount++
+        } catch (productError) {
+          console.error(`Error processing product ${product._id} for XML:`, productError)
+          continue
+        }
+      }
+
+      xml += `  </channel>
+</rss>`
+
+      console.log(`XML feed generated with ${processedCount} products out of ${totalCount} total`)
+      console.log(`XML Availability stats:`, availabilityStats)
+      setXmlFeedCache(xmlCacheKey, xml)
+      res.send(xml)
+    } catch (error) {
+      console.error("Google Merchant XML feed error:", error)
+      res.status(500).send(`<?xml version="1.0" encoding="UTF-8"?>
+<error>
+  <message><![CDATA[Error generating product feed: ${error.message}]]></message>
+</error>`)
+    }
+  }),
+)
+
+// @desc    Generate paginated feed for large datasets
+// @route   GET /api/google-merchant/feed-paginated.json
+// @access  Public
+router.get(
+  "/feed-paginated.json",
+  asyncHandler(async (req, res) => {
+    try {
+      const page = Number.parseInt(req.query.page) || 1
+      const limit = Number.parseInt(req.query.limit) || 500 // Default 500 products per page
+      const skip = (page - 1) * limit
+
+      const query = {
+        $or: [{ isActive: true }, { isActive: { $exists: false } }],
+      }
+
+      const totalCount = await Product.countDocuments(query)
+      const totalPages = Math.ceil(totalCount / limit)
+
+      const products = await Product.find(query)
+        .populate("brand", "name")
+        .populate("category", "name")
+        .populate("parentCategory", "name")
+        .skip(skip)
+        .limit(limit)
+        .lean()
+
+      res.json({
+        pagination: {
+          currentPage: page,
+          totalPages: totalPages,
+          totalProducts: totalCount,
+          productsPerPage: limit,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1,
+          nextPage: page < totalPages ? page + 1 : null,
+          prevPage: page > 1 ? page - 1 : null,
+        },
+        products: products.map((product) => ({
+          id: product._id.toString(),
+          name: product.name,
+          price: product.price,
+          offerPrice: product.offerPrice,
+          brand: product.brand?.name,
+          category: product.category?.name,
+          parentCategory: product.parentCategory?.name,
+          stockStatus: product.stockStatus,
+          countInStock: product.countInStock,
+          isActive: product.isActive,
+          availability: determineAvailability(product),
+        })),
+      })
+    } catch (error) {
+      console.error("Paginated feed error:", error)
+      res.status(500).json({ error: error.message })
+    }
+  }),
+)
+
+// @desc    Generate Brand-specific XML Feed (e.g., Acer, Dell, HP)
+// @route   GET /api/google-merchant/brand/:brandName/feed.xml
+// @access  Public
+router.get(
+  "/brand/:brandName/feed.xml",
+  asyncHandler(async (req, res) => {
+    try {
+      const brandName = req.params.brandName
+      
+      const { page, limit, skip, paginate } = parseFeedPagination(req)
+      const includeZeroPrice = req.query.includeZeroPrice === "true"
+      const feedLanguage = resolveFeedLanguage(req)
+
+      console.log(`Generating XML feed for brand: ${brandName}`)
+
+      // First, find the brand by name (case-insensitive)
+      const Brand = (await import("../models/brandModel.js")).default
+      const brand = await Brand.findOne({ 
+        name: { $regex: new RegExp(`^${brandName}$`, 'i') } 
+      })
+
+      if (!brand) {
+        res.status(404).send(`<?xml version="1.0" encoding="UTF-8"?>
+<error>
+  <message><![CDATA[Brand "${brandName}" not found]]></message>
+</error>`)
+        return
+      }
+
+      // Build query - include ALL active products for this brand
+      const query = {
+        name: { $exists: true, $ne: '' },
+        brand: brand._id,
+        $or: [{ isActive: true }, { isActive: { $exists: false } }]
+      }
+
+      if (!includeZeroPrice) {
+        query.$and = [FEED_PRICE_MATCH]
+      }
+
+      console.log("Fetching products for brand XML with query:", JSON.stringify(query))
+      console.log(`Brand XML Pagination: paginate=${paginate}, page=${page}, limit=${limit}, skip=${skip}`)
+
+      // Get total count first
+      const totalCount = await Product.countDocuments(query)
+      console.log(`Total ${brandName} products for XML: ${totalCount}`)
+
+      // Build the aggregation pipeline
+      const aggregationPipeline = [
+        { $match: query },
+        {
+          $lookup: {
+            from: "brands",
+            localField: "brand",
+            foreignField: "_id",
+            as: "brand",
+          },
+        },
+        {
+          $lookup: {
+            from: "subcategories",
+            localField: "category",
+            foreignField: "_id",
+            as: "category",
+          },
+        },
+        {
+          $lookup: {
+            from: "categories",
+            localField: "parentCategory",
+            foreignField: "_id",
+            as: "parentCategory",
+          },
+        },
+        {
+          $unwind: {
+            path: "$brand",
+            preserveNullAndEmptyArrays: true,
+          },
+        },
+        {
+          $unwind: {
+            path: "$category",
+            preserveNullAndEmptyArrays: true,
+          },
+        },
+        {
+          $unwind: {
+            path: "$parentCategory",
+            preserveNullAndEmptyArrays: true,
+          },
+        },
+      ]
+
+      // Add pagination only when opt-in pagination is enabled
+      if (limit > 0) {
+        aggregationPipeline.push({ $skip: skip })
+        aggregationPipeline.push({ $limit: limit })
+      }
+
+      const products = await Product.aggregate(aggregationPipeline)
+
+      console.log(`Found ${products.length} ${brandName} products for XML`)
+
+      res.set({
+        "Content-Type": "application/xml; charset=utf-8",
+        "Cache-Control": "public, max-age=3600",
+      })
+
+      let xml = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">
+  <channel>
+    <title><![CDATA[Irhaas ${brand.name} Products]]></title>
+    <link>https://www.irhaas.com</link>
+    <description><![CDATA[Irhaas ${brand.name} Product Feed - Total: ${totalCount} products]]></description>
+    <language>${feedLanguage}</language>
+    <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
+`
+
+      let processedCount = 0
+      const availabilityStats = {
+        inStock: 0,
+        outOfStock: 0,
+        preOrder: 0,
+      }
+
+      for (const product of products) {
+        try {
+          // Skip products without a name
+          if (!product.name || product.name.trim() === "") {
+            console.warn(`Skipping product ${product._id} - missing name`)
+            continue
+          }
+
+          const productUrl = buildProductUrl(product.slug || product._id.toString(), feedLanguage)
+          const imageUrl = fixImageUrl(product.image || `${BASE_API_URL}/placeholder.jpg`)
+
+          // Use the improved availability logic
+          const availability = determineAvailability(product)
+          trackAvailability(availabilityStats, availability)
+
+          // Handle pricing
+          const { price, salePrice } = getEffectiveFeedPrice(product, includeZeroPrice)
+          if (price === null) {
+            continue
+          }
+
+          // Clean and limit description
+          const localizedName = getLocalizedValue(product, "name", feedLanguage) || product.name
+          const localizedDescription = getLocalizedValue(product, "description", feedLanguage)
+            || getLocalizedValue(product, "shortDescription", feedLanguage)
+            || product.description
+            || product.shortDescription
+            || localizedName
+            || "No description available"
+          const cleanDescription = truncateDescription(localizedDescription)
+
+          // Truncate title
+          const truncatedTitle = truncateTitle(localizedName)
+
+          const parentCategoryName = getLocalizedValue(product.parentCategory, "name", feedLanguage) || product.parentCategory?.name
+          const categoryName = getLocalizedValue(product.category, "name", feedLanguage) || product.category?.name
+          const googleProductCategory = determineGoogleCategory(parentCategoryName, categoryName)
+          const productType =
+            (parentCategoryName || "Uncategorized") +
+            (categoryName ? ` > ${categoryName}` : "")
+
+          // Check if product has valid identifiers
+          const hasGtin = product.gtin && product.gtin.trim() !== ''
+          const hasMpn = product.sku && product.sku.trim() !== ''
+          const hasBrand = product.brand?.name && product.brand.name.toLowerCase() !== 'generic'
+          const identifierExists = hasGtin || (hasBrand && hasMpn)
+
+          const productId = getProductFeedId(product)
+          const itemGroupId = getItemGroupId(product)
+
+          xml += `    <item>
+      <g:id>${escapeXml(productId)}</g:id>
+      <g:title><![CDATA[${cleanForCDATA(truncatedTitle)}]]></g:title>
+      <g:description><![CDATA[${cleanForCDATA(cleanDescription)}]]></g:description>
+      <g:link>${escapeXml(productUrl)}</g:link>
+      <g:image_link>${escapeXml(imageUrl)}</g:image_link>
+      <g:price>${price.toFixed(2)} PKR</g:price>`
+
+          if (salePrice) {
+            xml += `
+      <g:sale_price>${salePrice.toFixed(2)} PKR</g:sale_price>`
+          }
+
+          xml += `
+      <g:availability>${availability}</g:availability>
+      <g:condition>new</g:condition>`
+
+          const brandName = getLocalizedValue(product.brand, "name", feedLanguage) || product.brand?.name
+          if (brandName) {
+            xml += `
+      <g:brand><![CDATA[${cleanForCDATA(brandName)}]]></g:brand>`
+          }
+
+          if (product.gtin) {
+            xml += `
+      <g:gtin>${escapeXml(product.gtin)}</g:gtin>`
+          }
+
+          if (product.sku) {
+            xml += `
+      <g:mpn><![CDATA[${cleanForCDATA(product.sku)}]]></g:mpn>`
+          } else {
+            xml += `
+      <g:mpn><![CDATA[${cleanForCDATA(product._id.toString())}]]></g:mpn>`
+          }
+
+          xml += `
+      <g:identifier_exists>${identifierExists ? 'yes' : 'no'}</g:identifier_exists>`
+
+          xml += `
+      <g:google_product_category><![CDATA[${googleProductCategory}]]></g:google_product_category>
+      <g:product_type><![CDATA[${cleanForCDATA(productType)}]]></g:product_type>`
+
+          if (itemGroupId) {
+            xml += `
+      <g:item_group_id>${escapeXml(itemGroupId)}</g:item_group_id>`
+          }
+
+          if (availability === "preorder") {
+            xml += `
+      <g:availability_date>${escapeXml(getPreorderAvailabilityDate(product))}</g:availability_date>`
+          }
+
+          xml += `
+      <g:shipping>
+        <g:country>AE</g:country>
+        <g:service>Standard Shipping</g:service>
+        <g:price>0.00 PKR</g:price>
+      </g:shipping>`
+
+          // Add additional images if available
+          if (product.galleryImages && product.galleryImages.length > 0) {
+            product.galleryImages.slice(0, 10).forEach((img) => {
+              if (img) {
+                const additionalImageUrl = fixImageUrl(img)
+                xml += `
+      <g:additional_image_link>${escapeXml(additionalImageUrl)}</g:additional_image_link>`
+              }
+            })
+          }
+
+          // Add weight if available
+          if (product.weight && product.weight > 0) {
+            xml += `
+      <g:shipping_weight>${product.weight} kg</g:shipping_weight>`
+          }
+
+          // Add custom labels
+          xml += `
+      <g:custom_label_0><![CDATA[${cleanForCDATA(brand.name)}]]></g:custom_label_0>`
+
+          if (product.featured) {
+            xml += `
+      <g:custom_label_1>Featured</g:custom_label_1>`
+          }
+
+          if (product.tags && product.tags.length > 0) {
+            const tagsString = product.tags.slice(0, 3).join(", ")
+            xml += `
+      <g:custom_label_2><![CDATA[${cleanForCDATA(tagsString)}]]></g:custom_label_2>`
+          }
+
+          xml += `
+    </item>
+`
+          processedCount++
+        } catch (productError) {
+          console.error(`Error processing ${brandName} product ${product._id} for XML:`, productError)
+          continue
+        }
+      }
+
+      xml += `  </channel>
+</rss>`
+
+      console.log(`${brandName} XML feed generated with ${processedCount} products out of ${totalCount} total`)
+      console.log(`${brandName} XML Availability stats:`, availabilityStats)
+      res.send(xml)
+    } catch (error) {
+      console.error(`Brand ${req.params.brandName} XML feed error:`, error)
+      res.status(500).send(`<?xml version="1.0" encoding="UTF-8"?>
+<error>
+  <message><![CDATA[Error generating ${req.params.brandName} product feed: ${error.message}]]></message>
+</error>`)
+    }
+  }),
+)
+
+// @desc    Get Brand product count
+// @route   GET /api/google-merchant/brand/:brandName/count
+// @access  Public
+router.get(
+  "/brand/:brandName/count",
+  asyncHandler(async (req, res) => {
+    try {
+      const brandName = req.params.brandName
+      
+      // Find the brand by name (case-insensitive)
+      const Brand = (await import("../models/brandModel.js")).default
+      const brand = await Brand.findOne({ 
+        name: { $regex: new RegExp(`^${brandName}$`, 'i') } 
+      })
+
+      if (!brand) {
+        res.status(404).json({ error: `Brand "${brandName}" not found` })
+        return
+      }
+
+      const query = {
+        brand: brand._id,
+        $or: [{ isActive: true }, { isActive: { $exists: false } }]
+      }
+
+      const totalCount = await Product.countDocuments(query)
+      const activeCount = await Product.countDocuments({ ...query, isActive: true })
+      const inStockCount = await Product.countDocuments({ ...query, stockStatus: "In Stock" })
+      const outOfStockCount = await Product.countDocuments({ ...query, stockStatus: "Out of Stock" })
+
+      res.json({
+        brand: brand.name,
+        brandId: brand._id,
+        totalProducts: totalCount,
+        activeProducts: activeCount,
+        inStock: inStockCount,
+        outOfStock: outOfStockCount,
+        feedUrl: `/api/google-merchant/brand/${brandName}/feed.xml`
+      })
+    } catch (error) {
+      console.error(`Brand ${req.params.brandName} count error:`, error)
+      res.status(500).json({ error: error.message })
+    }
+  }),
+)
+
+export default router

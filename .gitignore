@@ -1,0 +1,40 @@
+node_modules/
+
+# Secrets. The wildcard matters: .env.local and .env.backup hold the same credentials
+# as .env, and a repo this is pushed to is public.
+.env
+.env.*
+
+# Firebase service-account keys grant full admin access to the project.
+*firebase-adminsdk*.json
+serviceAccount*.json
+*.pem
+*.key
+
+# Build output
+dist/
+build/
+
+# Customer-uploaded files — not source, and may contain personal data.
+uploads/
+
+# The previous project's git history, kept locally as a backup.
+.git-graba2z-history-backup/
+
+# OS / editor noise
+.DS_Store
+._*
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# Logs
+*.log
+logs/
+
+# Vercel project linkage (contains project/org ids)
+.vercel/
+
+# Previous nested server repo history, kept locally.
+.git-server-history-backup/

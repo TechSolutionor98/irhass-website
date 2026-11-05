@@ -1,0 +1,2803 @@
+// import express from "express"
+// import asyncHandler from "express-async-handler"
+// import User from "../models/userModel.js"
+// import Order from "../models/orderModel.js"
+// import Product from "../models/productModel.js"
+// import generateToken from "../utils/generateToken.js"
+// import { protect, admin } from "../middleware/authMiddleware.js"
+// import { sendOrderNotification, sendTrackingUpdateEmail } from "../utils/emailService.js"
+// import Review from '../models/reviewModel.js';
+
+// const router = express.Router()
+
+// // @desc    Auth admin & get token
+// // @route   POST /api/admin/login
+// // @access  Public
+// router.post(
+//   "/login",
+//   asyncHandler(async (req, res) => {
+//     const { email, password } = req.body
+
+//     const user = await User.findOne({ email })
+
+//     if (user && (await user.matchPassword(password)) && user.isAdmin) {
+//       res.json({
+//         _id: user._id,
+//         name: user.name,
+//         email: user.email,
+//         isAdmin: user.isAdmin,
+//         token: generateToken(user._id),
+//       })
+//     } else {
+//       res.status(401)
+//       throw new Error("Invalid admin credentials")
+//     }
+//   }),
+// )
+
+// // @desc    Get admin profile
+// // @route   GET /api/admin/profile
+// // @access  Private/Admin
+// router.get(
+//   "/profile",
+//   protect,
+//   admin,
+//   asyncHandler(async (req, res) => {
+//     const user = await User.findById(req.user._id)
+
+//     if (user) {
+//       res.json({
+//         _id: user._id,
+//         name: user.name,
+//         email: user.email,
+//         isAdmin: user.isAdmin,
+//       })
+//     } else {
+//       res.status(404)
+//       throw new Error("User not found")
+//     }
+//   }),
+// )
+
+// // @desc    Get dashboard stats
+// // @route   GET /api/admin/stats
+// // @access  Private/Admin
+// router.get(
+//   "/stats",
+//   protect,
+//   admin,
+//   asyncHandler(async (req, res) => {
+//     const totalOrders = await Order.countDocuments()
+//     const totalProducts = await Product.countDocuments()
+//     const totalUsers = await User.countDocuments({ isAdmin: false })
+
+//     // Calculate total revenue
+//     const orders = await Order.find()
+//     const totalRevenue = orders.reduce((acc, order) => acc + order.totalPrice, 0)
+
+//     res.json({
+//       totalOrders,
+//       totalProducts,
+//       totalUsers,
+//       totalRevenue,
+//     })
+//   }),
+// )
+
+// // @desc    Get all users
+// // @route   GET /api/admin/users
+// // @access  Private/Admin
+// router.get(
+//   "/users",
+//   protect,
+//   admin,
+//   asyncHandler(async (req, res) => {
+//     const users = await User.find({ isAdmin: false }).select("-password").sort({ createdAt: -1 })
+//     res.json(users)
+//   }),
+// )
+
+// // @desc    Get all orders
+// // @route   GET /api/admin/orders
+// // @access  Private/Admin
+// router.get(
+//   "/orders",
+//   protect,
+//   admin,
+//   asyncHandler(async (req, res) => {
+//     const { page = 1, limit = 50, status, search } = req.query
+
+//     const query = {}
+
+//     if (status && status !== "all") {
+//       query.status = status
+//     }
+
+//     if (search) {
+//       query.$or = [
+//         { "shippingAddress.name": { $regex: search, $options: "i" } },
+//         { "shippingAddress.email": { $regex: search, $options: "i" } },
+//         { trackingId: { $regex: search, $options: "i" } },
+//       ]
+//     }
+
+//     const orders = await Order.find(query)
+//       .populate({ path: "user", select: "name email" })
+//       .populate({ path: "orderItems.product", select: "name image sku" })
+//       .sort({ createdAt: -1 })
+//       .limit(limit * 1)
+//       .skip((page - 1) * limit)
+
+//     // TEMP DEBUG: log first order item product keys to ensure sku is present
+//     if (process.env.NODE_ENV !== 'production' && orders[0]?.orderItems?.[0]?.product) {
+//       const prod = orders[0].orderItems[0].product
+//       console.log('DEBUG orderItems.product keys:', Object.keys(prod._doc || prod))
+//       console.log('DEBUG sample product.sku:', prod.sku)
+//     }
+
+//     res.json(orders)
+//   }),
+// )
+
+// // @desc    Get recent orders
+// // @route   GET /api/admin/orders/recent
+// // @access  Private/Admin
+// router.get(
+//   "/orders/recent",
+//   protect,
+//   admin,
+//   asyncHandler(async (req, res) => {
+//     const orders = await Order.find({})
+//       .populate({ path: "user", select: "name email" })
+//       .populate({ path: "orderItems.product", select: "name image sku" })
+//       .sort({ createdAt: -1 })
+//       .limit(5)
+//     res.json(orders)
+//   }),
+// )
+
+// // @desc    Update order status
+// // @route   PUT /api/admin/orders/:id/status
+// // @access  Private/Admin
+// router.put(
+//   "/orders/:id/status",
+//   protect,
+//   admin,
+//   asyncHandler(async (req, res) => {
+//     const order = await Order.findById(req.params.id)
+
+//     if (order) {
+//       const previousStatus = order.status
+//       order.status = req.body.status
+
+//       // Update delivered date if status is Delivered
+//       if (req.body.status === "Delivered" && previousStatus !== "Delivered") {
+//         order.deliveredAt = new Date()
+//       }
+
+//       const updatedOrder = await order.save()
+
+//       // Send notification email only if status has changed
+//       if (previousStatus !== req.body.status) {
+//         try {
+//           await sendOrderNotification(updatedOrder)
+//           console.log(`Order status update email sent for order ${updatedOrder._id}`)
+//         } catch (emailError) {
+//           console.error("Failed to send order status update email:", emailError)
+//           // Don't fail the order update if email fails
+//         }
+//       }
+
+//       res.json(updatedOrder)
+//     } else {
+//       res.status(404)
+//       throw new Error("Order not found")
+//     }
+//   }),
+// )
+
+// // @desc    Update order tracking ID
+// // @route   PUT /api/admin/orders/:id/tracking
+// // @access  Private/Admin
+// router.put(
+//   "/orders/:id/tracking",
+//   protect,
+//   admin,
+//   asyncHandler(async (req, res) => {
+//     const order = await Order.findById(req.params.id)
+
+//     if (order) {
+//       const previousTrackingId = order.trackingId
+//       order.trackingId = req.body.trackingId
+//       const updatedOrder = await order.save()
+
+//       // Send tracking update email only if tracking ID has changed
+//       if (previousTrackingId !== req.body.trackingId && req.body.trackingId) {
+//         try {
+//           await sendTrackingUpdateEmail(updatedOrder)
+//           console.log(`Tracking update email sent for order ${updatedOrder._id}`)
+//         } catch (emailError) {
+//           console.error("Failed to send tracking update email:", emailError)
+//           // Don't fail the order update if email fails
+//         }
+//       }
+
+//       res.json(updatedOrder)
+//     } else {
+//       res.status(404)
+//       throw new Error("Order not found")
+//     }
+//   }),
+// )
+
+// // @desc    Update order details (payment method, notes, etc.)
+// // @route   PUT /api/admin/orders/:id
+// // @access  Private/Admin
+// router.put(
+//   "/orders/:id",
+//   protect,
+//   admin,
+//   asyncHandler(async (req, res) => {
+//     const order = await Order.findById(req.params.id)
+
+//     if (order) {
+//       const { paymentMethod, isPaid, notes, estimatedDelivery, cancelReason } = req.body
+
+//       if (paymentMethod) order.paymentMethod = paymentMethod
+//       if (isPaid !== undefined) {
+//         order.isPaid = isPaid
+//         if (isPaid && !order.paidAt) {
+//           order.paidAt = new Date()
+//         } else if (!isPaid) {
+//           order.paidAt = null
+//         }
+//       }
+//       if (notes !== undefined) order.notes = notes
+//       if (estimatedDelivery) order.estimatedDelivery = new Date(estimatedDelivery)
+//       if (cancelReason !== undefined) order.cancelReason = cancelReason
+
+//       const updatedOrder = await order.save()
+//       res.json(updatedOrder)
+//     } else {
+//       res.status(404)
+//       throw new Error("Order not found")
+//     }
+//   }),
+// )
+
+// // @desc    Send order notification email
+// // @route   POST /api/admin/orders/:id/notify
+// // @access  Private/Admin
+// router.post(
+//   "/orders/:id/notify",
+//   protect,
+//   admin,
+//   asyncHandler(async (req, res) => {
+//     const order = await Order.findById(req.params.id)
+
+//     if (!order) {
+//       res.status(404)
+//       throw new Error("Order not found")
+//     }
+
+//     const result = await sendOrderNotification(order)
+
+//     if (result.success) {
+//       res.json({
+//         message: "Notification sent successfully",
+//         messageId: result.messageId,
+//       })
+//     } else {
+//       res.status(500)
+//       throw new Error(`Failed to send notification: ${result.error}`)
+//     }
+//   }),
+// )
+
+// // @desc    Get order statistics
+// // @route   GET /api/admin/orders/stats
+// // @access  Private/Admin
+// router.get(
+//   "/orders/stats",
+//   protect,
+//   admin,
+//   asyncHandler(async (req, res) => {
+//     const totalOrders = await Order.countDocuments()
+//     const pendingOrders = await Order.countDocuments({ status: "Processing" })
+//     const deliveredOrders = await Order.countDocuments({ status: "Delivered" })
+//     const cancelledOrders = await Order.countDocuments({ status: "Cancelled" })
+
+//     const totalRevenue = await Order.aggregate([
+//       { $match: { isPaid: true } },
+//       { $group: { _id: null, total: { $sum: "$totalPrice" } } },
+//     ])
+
+//     const monthlyRevenue = await Order.aggregate([
+//       {
+//         $match: {
+//           isPaid: true,
+//           createdAt: { $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) },
+//         },
+//       },
+//       { $group: { _id: null, total: { $sum: "$totalPrice" } } },
+//     ])
+
+//     res.json({
+//       totalOrders,
+//       pendingOrders,
+//       deliveredOrders,
+//       cancelledOrders,
+//       totalRevenue: totalRevenue[0]?.total || 0,
+//       monthlyRevenue: monthlyRevenue[0]?.total || 0,
+//     })
+//   }),
+// )
+
+// // @desc    Delete user (Admin)
+// // @route   DELETE /api/admin/users/:id
+// // @access  Private/Admin
+// router.delete(
+//   "/users/:id",
+//   protect,
+//   admin,
+//   asyncHandler(async (req, res) => {
+//     const user = await User.findById(req.params.id)
+
+//     if (user) {
+//       if (user.isAdmin) {
+//         res.status(400)
+//         throw new Error("Cannot delete admin user")
+//       }
+//       await User.findByIdAndDelete(req.params.id)
+//       res.json({ message: "User removed" })
+//     } else {
+//       res.status(404)
+//       throw new Error("User not found")
+//     }
+//   }),
+// )
+
+// // @desc    Get user by ID (Admin)
+// // @route   GET /api/admin/users/:id
+// // @access  Private/Admin
+// router.get(
+//   "/users/:id",
+//   protect,
+//   admin,
+//   asyncHandler(async (req, res) => {
+//     const user = await User.findById(req.params.id).select("-password")
+
+//     if (user) {
+//       res.json(user)
+//     } else {
+//       res.status(404)
+//       throw new Error("User not found")
+//     }
+//   }),
+// )
+
+// // @desc    Update user (Admin)
+// // @route   PUT /api/admin/users/:id
+// // @access  Private/Admin
+// router.put(
+//   "/users/:id",
+//   protect,
+//   admin,
+//   asyncHandler(async (req, res) => {
+//     const user = await User.findById(req.params.id)
+
+//     if (user) {
+//       user.name = req.body.name || user.name
+//       user.email = req.body.email || user.email
+//       user.isAdmin = Boolean(req.body.isAdmin)
+
+//       const updatedUser = await user.save()
+
+//       res.json({
+//         _id: updatedUser._id,
+//         name: updatedUser.name,
+//         email: updatedUser.email,
+//         isAdmin: updatedUser.isAdmin,
+//       })
+//     } else {
+//       res.status(404)
+//       throw new Error("User not found")
+//     }
+//   }),
+// )
+
+// // @desc    Get all reviews
+// // @route   GET /api/admin/reviews
+// // @access  Private/Admin
+// router.get('/reviews', protect, admin, async (req, res) => {
+//   try {
+//     console.log('🔍 Admin reviews route accessed by:', req.user.email);
+    
+//     const page = parseInt(req.query.page) || 1;
+//     const limit = parseInt(req.query.limit) || 10;
+//     const status = req.query.status;
+//     const search = req.query.search;
+
+//     // Build query
+//     let query = {};
+    
+//     if (status && status !== 'all') {
+//       query.status = status;
+//     }
+
+//     if (search) {
+//       query.$or = [
+//         { name: { $regex: search, $options: 'i' } },
+//         { email: { $regex: search, $options: 'i' } },
+//         { comment: { $regex: search, $options: 'i' } }
+//       ];
+//     }
+
+//     // Get total count
+//     const totalReviews = await Review.countDocuments(query);
+//     console.log('📈 Total reviews found:', totalReviews);
+
+//     // Get reviews with pagination
+//     const reviews = await Review.find(query)
+//       .populate('product', 'name price images')
+//       .sort({ createdAt: -1 })
+//       .limit(limit * 1)
+//       .skip((page - 1) * limit);
+
+//     console.log('📋 Raw reviews from DB:', reviews.length);
+
+//     // Process reviews and debug images
+//     const processedReviews = reviews.map(review => {
+//       const reviewObj = review.toObject();
+      
+//       // Debug image field
+//       console.log('🖼️ Review image field:', {
+//         reviewId: reviewObj._id,
+//         image: reviewObj.image,
+//         imageType: typeof reviewObj.image
+//       });
+      
+//       // Add different image URL formats for testing
+//       if (reviewObj.image) {
+//         reviewObj.imageDebug = {
+//           original: reviewObj.image,
+//           url1: `/uploads/reviews/${reviewObj.image}`,
+//           url2: `/uploads/${reviewObj.image}`,
+//           url3: reviewObj.image.startsWith('/') ? reviewObj.image : `/uploads/reviews/${reviewObj.image}`,
+//           fullUrl: `http://localhost:5000/uploads/reviews/${reviewObj.image}`
+//         };
+//       }
+      
+//       return reviewObj;
+//     });
+
+//     // Calculate stats
+//     const stats = {
+//       total: await Review.countDocuments(),
+//       pending: await Review.countDocuments({ status: 'pending' }),
+//       approved: await Review.countDocuments({ status: 'approved' }),
+//       rejected: await Review.countDocuments({ status: 'rejected' })
+//     };
+
+//     res.json({
+//       success: true,
+//       reviews: processedReviews,
+//       stats,
+//       pagination: {
+//         currentPage: page,
+//         totalPages: Math.ceil(totalReviews / limit),
+//         totalReviews,
+//         hasNextPage: page < Math.ceil(totalReviews / limit),
+//         hasPrevPage: page > 1
+//       }
+//     });
+
+//   } catch (error) {
+//     console.error('❌ Error in admin reviews route:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Server error in reviews route',
+//       error: error.message
+//     });
+//   }
+// });
+
+// // @desc    Get review by ID (Admin)
+// // @route   GET /api/admin/reviews/:id
+// // @access  Private/Admin
+// router.get('/reviews/:id', protect, admin, async (req, res) => {
+//   try {
+//     console.log('🔍 Getting review by ID:', req.params.id);
+    
+//     const review = await Review.findById(req.params.id)
+//       .populate('product', 'name price images');
+
+//     if (!review) {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Review not found'
+//       });
+//     }
+
+//     res.json({
+//       success: true,
+//       review
+//     });
+//   } catch (error) {
+//     console.error('❌ Error fetching review:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Server error',
+//       error: error.message
+//     });
+//   }
+// });
+
+// // @desc    Approve review (Admin)
+// // @route   PUT /api/admin/reviews/:id/approve
+// // @access  Private/Admin
+// router.put('/reviews/:id/approve', protect, admin, async (req, res) => {
+//   try {
+//     console.log('✅ Approving review:', req.params.id);
+    
+//     const review = await Review.findById(req.params.id);
+
+//     if (!review) {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Review not found'
+//       });
+//     }
+
+//     review.status = 'approved';
+//     review.adminNotes = req.body.adminNotes || '';
+//     review.approvedAt = new Date();
+//     review.approvedBy = req.user._id;
+
+//     await review.save();
+
+//     res.json({
+//       success: true,
+//       message: 'Review approved successfully',
+//       review
+//     });
+//   } catch (error) {
+//     console.error('❌ Error approving review:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Server error',
+//       error: error.message
+//     });
+//   }
+// });
+
+// // @desc    Reject review (Admin)
+// // @route   PUT /api/admin/reviews/:id/reject
+// // @access  Private/Admin
+// router.put('/reviews/:id/reject', protect, admin, async (req, res) => {
+//   try {
+//     console.log('❌ Rejecting review:', req.params.id);
+    
+//     const review = await Review.findById(req.params.id);
+
+//     if (!review) {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Review not found'
+//       });
+//     }
+
+//     review.status = 'rejected';
+//     review.adminNotes = req.body.adminNotes || '';
+//     review.rejectedAt = new Date();
+//     review.rejectedBy = req.user._id;
+
+//     await review.save();
+
+//     res.json({
+//       success: true,
+//       message: 'Review rejected successfully',
+//       review
+//     });
+//   } catch (error) {
+//     console.error('❌ Error rejecting review:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Server error',
+//       error: error.message
+//     });
+//   }
+// });
+
+// // @desc    Delete review (Admin)
+// // @route   DELETE /api/admin/reviews/:id
+// // @access  Private/Admin
+// router.delete('/reviews/:id', protect, admin, async (req, res) => {
+//   try {
+//     console.log('🗑️ Deleting review:', req.params.id);
+    
+//     const review = await Review.findById(req.params.id);
+
+//     if (!review) {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Review not found'
+//       });
+//     }
+
+//     await Review.findByIdAndDelete(req.params.id);
+
+//     res.json({
+//       success: true,
+//       message: 'Review deleted successfully'
+//     });
+//   } catch (error) {
+//     console.error('❌ Error deleting review:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Server error',
+//       error: error.message
+//     });
+//   }
+// });
+
+// // Add a test route to verify admin routes are working
+// router.get('/test-reviews', protect, admin, (req, res) => {
+//   console.log('🧪 Test route accessed by:', req.user.email);
+//   res.json({
+//     success: true,
+//     message: 'Admin review routes are working!',
+//     user: req.user.email,
+//     timestamp: new Date()
+//   });
+// });
+
+// export default router
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import express from "express"
+import asyncHandler from "express-async-handler"
+import User from "../models/userModel.js"
+import ReferralType from "../models/referralTypeModel.js"
+import LoyaltyType from "../models/loyaltyTypeModel.js"
+import Order from "../models/orderModel.js"
+import Product from "../models/productModel.js"
+import generateToken from "../utils/generateToken.js"
+import { protect, admin } from "../middleware/authMiddleware.js"
+import {
+  sendOrderNotification,
+  sendTrackingUpdateEmail,
+  sendOrderPlacedEmail,
+  sendQuotationCreatedEmail,
+} from "../utils/emailService.js"
+import Review from "../models/reviewModel.js"
+import { logActivity } from "../middleware/permissionMiddleware.js"
+import { issueSeoUnlockToken, verifySeoUnlockPassword } from "../middleware/seoUnlockMiddleware.js"
+import { syncOrderLoyaltyForStatus } from "../utils/loyalty.js"
+import { syncOrderReferralForStatus } from "../utils/referral.js"
+import { ensureCustomerAccount } from "../utils/customerAccounts.js"
+
+const router = express.Router()
+const ORDER_DOCUMENT_QUERY = {
+  $or: [{ documentType: "order" }, { documentType: { $exists: false } }],
+}
+const QUOTATION_DOCUMENT_QUERY = { documentType: "quotation", status: { $ne: "Deleted" } }
+
+// An order raised from a quotation carries the quotation it came from. That is what
+// separates wholesale from retail, so the two lists never show each other's rows.
+// Deliberately NOT folded into ORDER_DOCUMENT_QUERY: the dashboard counts and revenue
+// totals use that, and wholesale orders are real revenue that must still be counted.
+// In MongoDB `{ field: null }` matches both null and missing, so a storefront order
+// written before this field existed is still treated as retail.
+const RETAIL_ONLY_FILTER = { sourceQuotationId: null }
+const WHOLESALE_ONLY_FILTER = { sourceQuotationId: { $ne: null } }
+
+// Neutralises the characters that would otherwise be read as regex syntax, so a value
+// taken from a form is compared as the literal text it is.
+const escapeRegex = (value = "") => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+// @desc    Auth admin & get token
+// @route   POST /api/admin/login
+// @access  Public
+router.post(
+  "/login",
+  asyncHandler(async (req, res) => {
+    const { email, password } = req.body
+
+    // Email is matched without case. Signup never forced a case, so a stored address
+    // can be mixed case just as easily as a typed one -- lowercasing either side alone
+    // would still miss. Anchored and escaped so the address is compared whole and a
+    // regex character typed into the field cannot widen the match.
+    const normalizedEmail = String(email || "").trim()
+    const user = normalizedEmail
+      ? await User.findOne({ email: { $regex: `^${escapeRegex(normalizedEmail)}$`, $options: "i" } })
+      : null
+
+    if (user && (await user.matchPassword(password)) && (user.isAdmin || user.isSuperAdmin)) {
+      // Log the login activity
+      await logActivity({
+        user: user,
+        action: "LOGIN",
+        module: "AUTH",
+        description: `Admin user logged in: ${user.email}`,
+        req,
+      })
+
+      res.json({
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        isAdmin: user.isAdmin,
+        isSuperAdmin: user.isSuperAdmin,
+        permissions: user.adminPermissions || {},
+        token: generateToken(user._id),
+      })
+    } else {
+      res.status(401)
+      throw new Error("Invalid admin credentials")
+    }
+  }),
+)
+
+// @desc    Get admin profile
+// @route   GET /api/admin/profile
+// @access  Private/Admin
+router.get(
+  "/profile",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const user = await User.findById(req.user._id)
+
+    if (user) {
+      res.json({
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        isAdmin: user.isAdmin,
+        isSuperAdmin: user.isSuperAdmin,
+        permissions: user.adminPermissions || {},
+      })
+    } else {
+      res.status(404)
+      throw new Error("User not found")
+    }
+  }),
+)
+
+// @desc    Get dashboard stats
+// @route   GET /api/admin/stats
+// @access  Private/Admin
+router.get(
+  "/stats",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    // Revenue is summed in the database. This used to Order.find() every order and
+    // reduce() in Node, which pulled the whole collection into memory on each
+    // dashboard load -- fine at ten orders, not at ten thousand.
+    const now = new Date()
+    const d30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+    const d60 = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000)
+
+    // Cancelled, returned and deleted orders are counted in totals but never in
+    // revenue -- that money was not earned.
+    const EARNED = { ...ORDER_DOCUMENT_QUERY, status: { $nin: ["Cancelled", "Returned", "Deleted"] } }
+    // Anything not yet handed to the courier is still the admin's to action.
+    const OPEN_STATUSES = ["New", "Processing", "Confirmed", "Ready for Shipment", "On Hold"]
+
+    const sumRevenue = async (match) => {
+      const [row] = await Order.aggregate([{ $match: match }, { $group: { _id: null, total: { $sum: "$totalPrice" } } }])
+      return row?.total || 0
+    }
+
+    const [
+      totalOrders, totalProducts, totalUsers,
+      totalRevenue, revenue30d, revenuePrev30d,
+      orders30d, ordersPrev30d, newUsers30d,
+      pendingOrders, outOfStock, lowStock,
+    ] = await Promise.all([
+      Order.countDocuments(ORDER_DOCUMENT_QUERY),
+      Product.countDocuments(),
+      User.countDocuments({ isAdmin: false }),
+      sumRevenue(EARNED),
+      sumRevenue({ ...EARNED, createdAt: { $gte: d30 } }),
+      sumRevenue({ ...EARNED, createdAt: { $gte: d60, $lt: d30 } }),
+      Order.countDocuments({ ...ORDER_DOCUMENT_QUERY, createdAt: { $gte: d30 } }),
+      Order.countDocuments({ ...ORDER_DOCUMENT_QUERY, createdAt: { $gte: d60, $lt: d30 } }),
+      User.countDocuments({ isAdmin: false, createdAt: { $gte: d30 } }),
+      Order.countDocuments({ ...ORDER_DOCUMENT_QUERY, status: { $in: OPEN_STATUSES } }),
+      Product.countDocuments({ isActive: true, countInStock: { $lte: 0 } }),
+      // "Low" is per-product: each one carries its own lowStockWarning threshold.
+      Product.countDocuments({
+        isActive: true,
+        countInStock: { $gt: 0 },
+        $expr: { $lte: ["$countInStock", { $ifNull: ["$lowStockWarning", 5] }] },
+      }),
+    ])
+
+    res.json({
+      totalOrders,
+      totalProducts,
+      totalUsers,
+      totalRevenue,
+      revenue30d,
+      revenuePrev30d,
+      orders30d,
+      ordersPrev30d,
+      newUsers30d,
+      pendingOrders,
+      outOfStock,
+      lowStock,
+    })
+  }),
+)
+
+// Helper to aggregate delivered orders total amount and count per user
+const attachDeliveredPurchases = async (userList) => {
+  if (!userList || userList.length === 0) return []
+  const userIds = userList.map((u) => u._id)
+  const deliveredStats = await Order.aggregate([
+    {
+      $match: {
+        ...ORDER_DOCUMENT_QUERY,
+        status: { $in: ["Delivered", "delivered"] },
+        user: { $in: userIds },
+      },
+    },
+    {
+      $group: {
+        _id: "$user",
+        totalDeliveredAmount: { $sum: "$totalPrice" },
+        deliveredOrdersCount: { $sum: 1 },
+      },
+    },
+  ])
+
+  const statsMap = new Map()
+  for (const stat of deliveredStats) {
+    statsMap.set(String(stat._id), {
+      totalDeliveredAmount: Math.round((Number(stat.totalDeliveredAmount) || 0) * 100) / 100,
+      deliveredOrdersCount: Number(stat.deliveredOrdersCount) || 0,
+    })
+  }
+
+  return userList.map((u) => {
+    const obj = u.toObject ? u.toObject() : { ...u }
+    const stat = statsMap.get(String(u._id)) || { totalDeliveredAmount: 0, deliveredOrdersCount: 0 }
+    obj.deliveredPurchasedAmount = stat.totalDeliveredAmount
+    obj.deliveredOrdersCount = stat.deliveredOrdersCount
+    return obj
+  })
+}
+
+// @desc    Get all users
+// @route   GET /api/admin/users
+// @access  Private/Admin
+router.get(
+  "/users",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const { search, referralType, loyaltyType, role, dateRange, purchased, sortBy } = req.query
+    const page = req.query.page ? Number(req.query.page) : null
+    const limit = req.query.limit ? Number(req.query.limit) : 20
+
+    const conditions = []
+
+    // Role filter
+    if (role === "admin") {
+      conditions.push({ isAdmin: true })
+    } else if (role === "all") {
+      // no isAdmin filter
+    } else {
+      // default: customers
+      conditions.push({ isAdmin: false })
+    }
+
+    // Search by name or email
+    if (search && String(search).trim()) {
+      const regex = new RegExp(String(search).trim(), "i")
+      conditions.push({ $or: [{ name: regex }, { email: regex }] })
+    }
+
+    // Referral Tier filter
+    if (referralType && referralType !== "all") {
+      if (referralType === "default" || referralType === "unassigned") {
+        conditions.push({ $or: [{ referralType: null }, { referralType: { $exists: false } }] })
+      } else {
+        conditions.push({ referralType })
+      }
+    }
+
+    // Loyalty Tier filter
+    if (loyaltyType && loyaltyType !== "all") {
+      if (loyaltyType === "default" || loyaltyType === "unassigned") {
+        conditions.push({ $or: [{ loyaltyType: null }, { loyaltyType: { $exists: false } }] })
+      } else {
+        conditions.push({ loyaltyType })
+      }
+    }
+
+    // Date range filter
+    if (dateRange && dateRange !== "all") {
+      const now = Date.now()
+      if (dateRange === "7d") {
+        conditions.push({ createdAt: { $gte: new Date(now - 7 * 86400000) } })
+      } else if (dateRange === "30d") {
+        conditions.push({ createdAt: { $gte: new Date(now - 30 * 86400000) } })
+      } else if (dateRange === "90d") {
+        conditions.push({ createdAt: { $gte: new Date(now - 90 * 86400000) } })
+      } else if (dateRange === "year") {
+        conditions.push({ createdAt: { $gte: new Date(new Date().getFullYear(), 0, 1) } })
+      }
+    }
+
+    // Purchase status filter (only count orders with status "Delivered")
+    if (purchased && purchased !== "all") {
+      const deliveredUserIds = await Order.distinct("user", {
+        ...ORDER_DOCUMENT_QUERY,
+        status: { $in: ["Delivered", "delivered"] },
+        user: { $ne: null },
+      })
+
+      if (purchased === "has_purchases") {
+        conditions.push({ _id: { $in: deliveredUserIds } })
+      } else if (purchased === "no_purchases") {
+        conditions.push({ _id: { $nin: deliveredUserIds } })
+      }
+    }
+
+    const query = conditions.length > 0 ? { $and: conditions } : {}
+
+    // Special sorting by delivered purchase amount
+    if (sortBy === "purchases_high" || sortBy === "purchases_low") {
+      const allMatching = await User.find(query)
+        .select("-password")
+        .populate("referralType", "name color description refereeDiscountValue referrerDiscountValue isDefault")
+        .populate("loyaltyType", "name color description earnMultiplier customEarnPointsPerAed isDefault")
+
+      const withStats = await attachDeliveredPurchases(allMatching)
+      withStats.sort((a, b) => {
+        const diff = (b.deliveredPurchasedAmount || 0) - (a.deliveredPurchasedAmount || 0)
+        return sortBy === "purchases_high" ? diff : -diff
+      })
+
+      const count = withStats.length
+      if (page) {
+        const skip = (page - 1) * limit
+        const paged = withStats.slice(skip, skip + limit)
+        return res.json({
+          users: paged,
+          page,
+          pages: Math.ceil(count / limit),
+          total: count,
+        })
+      }
+      return res.json(withStats.slice(0, 200))
+    }
+
+    // Standard sorting
+    let sortOption = { createdAt: -1 }
+    if (sortBy === "oldest") sortOption = { createdAt: 1 }
+    else if (sortBy === "name_asc") sortOption = { name: 1 }
+    else if (sortBy === "name_desc") sortOption = { name: -1 }
+
+    if (page) {
+      const skip = (page - 1) * limit
+      const count = await User.countDocuments(query)
+      const users = await User.find(query)
+        .select("-password")
+        .populate("referralType", "name color description refereeDiscountValue referrerDiscountValue isDefault")
+        .populate("loyaltyType", "name color description earnMultiplier customEarnPointsPerAed isDefault")
+        .sort(sortOption)
+        .skip(skip)
+        .limit(limit)
+
+      const usersWithStats = await attachDeliveredPurchases(users)
+
+      res.json({
+        users: usersWithStats,
+        page,
+        pages: Math.ceil(count / limit),
+        total: count,
+      })
+    } else {
+      const users = await User.find(query)
+        .select("-password")
+        .populate("referralType", "name color description refereeDiscountValue referrerDiscountValue isDefault")
+        .populate("loyaltyType", "name color description earnMultiplier customEarnPointsPerAed isDefault")
+        .sort(sortOption)
+        .limit(200)
+
+      const usersWithStats = await attachDeliveredPurchases(users)
+      res.json(usersWithStats)
+    }
+  }),
+)
+
+// @desc    Get all orders
+// @route   GET /api/admin/orders
+// @access  Private/Admin
+router.get(
+  "/orders",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const { status, search } = req.query
+    const includeDeleted = String(req.query.includeDeleted).toLowerCase() === "true"
+    const hasPagination = req.query.page !== undefined || req.query.limit !== undefined
+    const page = Number.parseInt(req.query.page, 10) || 1
+    const limit = Number.parseInt(req.query.limit, 10) || 50
+
+    const normalizedStatus = typeof status === "string" ? status.trim() : ""
+    const wantsDeletedOnly = normalizedStatus.toLowerCase() === "deleted"
+
+    // One list route serves both screens; ?wholesale=true flips which half it shows.
+    const wantsWholesale = String(req.query.wholesale).toLowerCase() === "true"
+    const whereConditions = [ORDER_DOCUMENT_QUERY, wantsWholesale ? WHOLESALE_ONLY_FILTER : RETAIL_ONLY_FILTER]
+    if (!includeDeleted && !wantsDeletedOnly) {
+      whereConditions.push({ status: { $ne: "Deleted" } })
+    }
+
+    if (normalizedStatus && normalizedStatus.toLowerCase() !== "all") {
+      whereConditions.push({ status: normalizedStatus })
+    }
+
+    if (search) {
+      whereConditions.push({
+        $or: [
+          { "shippingAddress.name": { $regex: search, $options: "i" } },
+          { "shippingAddress.email": { $regex: search, $options: "i" } },
+          { trackingId: { $regex: search, $options: "i" } },
+        ],
+      })
+    }
+    const query = whereConditions.length === 1 ? whereConditions[0] : { $and: whereConditions }
+
+    let ordersQuery = Order.find(query)
+      .populate({ path: "user", select: "name email" })
+      .populate({
+        path: "orderItems.product",
+        select: "name image sku price offerPrice oldPrice discount",
+      })
+      .sort({ createdAt: -1 }) // Sort latest orders first by creation time
+
+    // Keep backward compatibility: paginate only when page/limit is explicitly requested
+    if (hasPagination) {
+      ordersQuery = ordersQuery.limit(limit).skip((page - 1) * limit)
+    }
+
+    const orders = await ordersQuery
+
+    // Debug logging for delivered orders
+    if (status === "Delivered") {
+      console.log(`[DEBUG] Delivered orders query returned: ${orders.length} orders`)
+      console.log(`[DEBUG] Order IDs:`, orders.map(o => o._id.toString().slice(-6)))
+    }
+
+    // TEMP DEBUG: log first order item product keys to ensure sku is present
+    if (process.env.NODE_ENV !== "production" && orders[0]?.orderItems?.[0]?.product) {
+      const prod = orders[0].orderItems[0].product
+      console.log("DEBUG orderItems.product keys:", Object.keys(prod._doc || prod))
+      console.log("DEBUG sample product.sku:", prod.sku)
+    }
+
+    res.json(orders)
+  }),
+)
+
+// @desc    Get recent orders
+// @route   GET /api/admin/orders/recent
+// @access  Private/Admin
+router.get(
+  "/orders/recent",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const orders = await Order.find({ ...ORDER_DOCUMENT_QUERY, status: { $ne: "Deleted" } })
+      .populate({ path: "user", select: "name email" })
+      .populate({
+        path: "orderItems.product",
+        select: "name image sku price offerPrice oldPrice discount",
+      })
+      .sort({ createdAt: -1 })
+      .limit(5)
+    res.json(orders)
+  }),
+)
+
+// @desc    Update order status
+// @route   PUT /api/admin/orders/:id/status
+// @access  Private/Admin
+router.put(
+  "/orders/:id/status",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const order = await Order.findById(req.params.id)
+
+    if (order) {
+      if (order.documentType === "quotation") {
+        res.status(400)
+        throw new Error("Quotation cannot be updated from order status endpoint")
+      }
+      const previousStatus = order.status
+
+      // Normalize incoming status to match schema enum values (case-insensitive)
+      const incoming = typeof req.body.status === "string" ? req.body.status.trim() : ""
+      const allowedStatuses = Order.schema.path("status").enumValues || []
+      const normalized = allowedStatuses.find((s) => s.toLowerCase() === incoming.toLowerCase())
+
+      if (!normalized) {
+        res.status(400)
+        throw new Error(
+          `Invalid status '${req.body.status}'. Allowed values: ${allowedStatuses.join(", ")}`,
+        )
+      }
+
+      order.status = normalized
+
+      // Update delivered date if status is Delivered
+      if (normalized === "Delivered" && previousStatus !== "Delivered") {
+        order.deliveredAt = new Date()
+      }
+
+      const updatedOrder = await order.save()
+
+      // Log activity
+      await logActivity(req, "STATUS_CHANGE", "ORDERS", `Changed order ${order.trackingId || order._id} status from ${previousStatus} to ${normalized}`, order._id, order.trackingId || order._id)
+
+      // Points earned on an order stay pending until it reaches the award status, so a
+      // cancelled or returned order never pays out.
+      if (previousStatus !== normalized) {
+        await syncOrderLoyaltyForStatus(updatedOrder._id, normalized)
+        // A referral only pays the referrer once the friend's order is actually
+        // delivered, and is unwound if it is later cancelled or returned.
+        await syncOrderReferralForStatus(updatedOrder._id, normalized)
+      }
+
+      // The customer is only written to when an admin ticks the box. Staff move
+      // orders through these statuses for their own bookkeeping far more often
+      // than the customer needs telling, so silence is the default and the
+      // caller has to opt in.
+      if (previousStatus !== normalized && req.body.sendCustomerEmail === true) {
+        try {
+          await sendOrderNotification(updatedOrder)
+          console.log(`Order status update email sent for order ${updatedOrder._id}`)
+        } catch (emailError) {
+          console.error("Failed to send order status update email:", emailError)
+          // Don't fail the order update if email fails
+        }
+      }
+
+      res.json(updatedOrder)
+    } else {
+      res.status(404)
+      throw new Error("Order not found")
+    }
+  }),
+)
+
+// @desc    Update order tracking ID
+// @route   PUT /api/admin/orders/:id/tracking
+// @access  Private/Admin
+router.put(
+  "/orders/:id/tracking",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const order = await Order.findById(req.params.id)
+
+    if (order) {
+      if (order.documentType === "quotation") {
+        res.status(400)
+        throw new Error("Quotation cannot be updated from order tracking endpoint")
+      }
+      const previousTrackingId = order.trackingId
+      order.trackingId = req.body.trackingId
+      const updatedOrder = await order.save()
+
+      // Opt-in, like the status email above -- a corrected typo in a tracking
+      // number should not mail the customer again.
+      if (
+        previousTrackingId !== req.body.trackingId &&
+        req.body.trackingId &&
+        req.body.sendCustomerEmail === true
+      ) {
+        try {
+          await sendTrackingUpdateEmail(updatedOrder)
+          console.log(`Tracking update email sent for order ${updatedOrder._id}`)
+        } catch (emailError) {
+          console.error("Failed to send tracking update email:", emailError)
+          // Don't fail the order update if email fails
+        }
+      }
+
+      res.json(updatedOrder)
+    } else {
+      res.status(404)
+      throw new Error("Order not found")
+    }
+  }),
+)
+
+// @desc    Update order details (payment method, notes, etc.)
+// @route   PUT /api/admin/orders/:id
+// @access  Private/Admin
+router.put(
+  "/orders/:id",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const order = await Order.findById(req.params.id)
+
+    if (order) {
+      if (order.documentType === "quotation") {
+        res.status(400)
+        throw new Error("Quotation cannot be updated from order details endpoint")
+      }
+      const { paymentMethod, isPaid, notes, estimatedDelivery, cancelReason } = req.body
+
+      if (paymentMethod) order.paymentMethod = paymentMethod
+      if (isPaid !== undefined) {
+        order.isPaid = isPaid
+        if (isPaid && !order.paidAt) {
+          order.paidAt = new Date()
+        } else if (!isPaid) {
+          order.paidAt = null
+        }
+      }
+      if (notes !== undefined) order.notes = notes
+      if (estimatedDelivery) order.estimatedDelivery = new Date(estimatedDelivery)
+      if (cancelReason !== undefined) order.cancelReason = cancelReason
+
+      const updatedOrder = await order.save()
+      res.json(updatedOrder)
+    } else {
+      res.status(404)
+      throw new Error("Order not found")
+    }
+  }),
+)
+
+// @desc    Unlock SEO settings for current admin session
+// @route   POST /api/admin/seo-unlock
+// @access  Private/Admin
+router.post(
+  "/seo-unlock",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const password = req.body?.password
+    if (!verifySeoUnlockPassword(password)) {
+      res.status(401)
+      throw new Error("Invalid SEO unlock password")
+    }
+
+    const { token, expiresAt, expiresInSeconds } = issueSeoUnlockToken(req.user._id)
+
+    res.json({
+      message: "SEO settings unlocked successfully",
+      unlockToken: token,
+      expiresAt,
+      expiresInSeconds,
+    })
+  }),
+)
+
+// @desc    Update order payment status only
+// @route   PUT /api/admin/orders/:id/payment
+// @access  Private/Admin
+router.put(
+  "/orders/:id/payment",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      res.status(404)
+      throw new Error("Order not found")
+    }
+    if (order.documentType === "quotation") {
+      res.status(400)
+      throw new Error("Quotation cannot be updated from order payment endpoint")
+    }
+
+    const { isPaid } = req.body
+    if (isPaid === undefined) {
+      res.status(400)
+      throw new Error("isPaid is required")
+    }
+
+    order.isPaid = Boolean(isPaid)
+    order.paidAt = order.isPaid ? order.paidAt || new Date() : null
+    if (req.body.paymentMethod) {
+      order.paymentMethod = req.body.paymentMethod
+    }
+
+    const updatedOrder = await order.save()
+    res.json(updatedOrder)
+  }),
+)
+
+// @desc    Send order notification email
+// @route   POST /api/admin/orders/:id/notify
+// @access  Private/Admin
+router.post(
+  "/orders/:id/notify",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const { sellerMessage } = req.body
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      res.status(404)
+      throw new Error("Order not found")
+    }
+    if (order.documentType === "quotation") {
+      res.status(400)
+      throw new Error("Quotation cannot send order notification email")
+    }
+
+    // If seller message is provided, update the order first
+    if (sellerMessage !== undefined) {
+      order.sellerMessage = sellerMessage
+      await order.save()
+    }
+
+    const result = await sendOrderNotification(order)
+
+    if (result.success) {
+      res.json({
+        message: "Notification sent successfully",
+        messageId: result.messageId,
+      })
+    } else {
+      res.status(500)
+      throw new Error(`Failed to send notification: ${result.error}`)
+    }
+  }),
+)
+
+// @desc    Get order statistics
+// @route   GET /api/admin/orders/stats
+// @access  Private/Admin
+router.get(
+  "/orders/stats",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const totalOrders = await Order.countDocuments(ORDER_DOCUMENT_QUERY)
+    const pendingOrders = await Order.countDocuments({ ...ORDER_DOCUMENT_QUERY, status: "Processing" })
+    const deliveredOrders = await Order.countDocuments({ ...ORDER_DOCUMENT_QUERY, status: "Delivered" })
+    const cancelledOrders = await Order.countDocuments({ ...ORDER_DOCUMENT_QUERY, status: "Cancelled" })
+
+    const totalRevenue = await Order.aggregate([
+      { $match: { ...ORDER_DOCUMENT_QUERY, isPaid: true } },
+      { $group: { _id: null, total: { $sum: "$totalPrice" } } },
+    ])
+
+    const monthlyRevenue = await Order.aggregate([
+      {
+        $match: {
+          ...ORDER_DOCUMENT_QUERY,
+          isPaid: true,
+          createdAt: { $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) },
+        },
+      },
+      { $group: { _id: null, total: { $sum: "$totalPrice" } } },
+    ])
+
+    res.json({
+      totalOrders,
+      pendingOrders,
+      deliveredOrders,
+      cancelledOrders,
+      totalRevenue: totalRevenue[0]?.total || 0,
+      monthlyRevenue: monthlyRevenue[0]?.total || 0,
+    })
+  }),
+)
+
+// @desc    Delete user (Admin)
+// @route   DELETE /api/admin/users/:id
+// @access  Private/Admin
+router.delete(
+  "/users/:id",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const user = await User.findById(req.params.id)
+
+    if (user) {
+      if (user.isAdmin) {
+        res.status(400)
+        throw new Error("Cannot delete admin user")
+      }
+      const userName = user.name
+      const userId = user._id
+      await User.findByIdAndDelete(req.params.id)
+
+      // Log activity
+      await logActivity(req, "DELETE", "USERS", `Deleted user: ${userName} (${user.email})`, userId, userName)
+
+      res.json({ message: "User removed" })
+    } else {
+      res.status(404)
+      throw new Error("User not found")
+    }
+  }),
+)
+
+// @desc    Get user by ID (Admin)
+// @route   GET /api/admin/users/:id
+// @access  Private/Admin
+router.get(
+  "/users/:id",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const user = await User.findById(req.params.id)
+      .select("-password")
+      .populate("referralType", "name color description refereeDiscountValue referrerDiscountValue isDefault")
+      .populate("loyaltyType", "name color description earnMultiplier customEarnPointsPerAed isDefault")
+
+    if (user) {
+      const [userWithStats] = await attachDeliveredPurchases([user])
+      res.json(userWithStats)
+    } else {
+      res.status(404)
+      throw new Error("User not found")
+    }
+  }),
+)
+
+// @desc    Update user (Admin)
+// @route   PUT /api/admin/users/:id
+// @access  Private/Admin
+router.put(
+  "/users/:id",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const user = await User.findById(req.params.id)
+
+    if (user) {
+      user.name = req.body.name || user.name
+      user.email = req.body.email || user.email
+      if (req.body.isAdmin !== undefined) {
+        user.isAdmin = Boolean(req.body.isAdmin)
+      }
+      if (req.body.referralType !== undefined) {
+        user.referralType = req.body.referralType || null
+      }
+      if (req.body.loyaltyType !== undefined) {
+        user.loyaltyType = req.body.loyaltyType || null
+      }
+
+      const updatedUser = await user.save()
+      await updatedUser.populate("referralType", "name color description refereeDiscountValue referrerDiscountValue isDefault")
+      await updatedUser.populate("loyaltyType", "name color description earnMultiplier customEarnPointsPerAed isDefault")
+
+      // Log activity
+      await logActivity(req, "UPDATE", "USERS", `Updated user: ${updatedUser.name} (${updatedUser.email})`, updatedUser._id, updatedUser.name)
+
+      res.json({
+        _id: updatedUser._id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        isAdmin: updatedUser.isAdmin,
+        referralType: updatedUser.referralType,
+        loyaltyType: updatedUser.loyaltyType,
+      })
+    } else {
+      res.status(404)
+      throw new Error("User not found")
+    }
+  }),
+)
+
+// @desc    Assign referral and/or loyalty tier to user (Admin)
+// @route   PUT /api/admin/users/:id/tier
+// @access  Private/Admin
+router.put(
+  "/users/:id/tier",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const user = await User.findById(req.params.id)
+    if (!user) {
+      res.status(404)
+      throw new Error("User not found")
+    }
+
+    if (req.body.referralType !== undefined) {
+      user.referralType = req.body.referralType || null
+    }
+    if (req.body.loyaltyType !== undefined) {
+      user.loyaltyType = req.body.loyaltyType || null
+    }
+
+    const updatedUser = await user.save()
+    await updatedUser.populate("referralType", "name color description refereeDiscountValue referrerDiscountValue isDefault")
+    await updatedUser.populate("loyaltyType", "name color description earnMultiplier customEarnPointsPerAed isDefault")
+
+    await logActivity(
+      req,
+      "UPDATE",
+      "USERS",
+      `Assigned tiers to ${updatedUser.name}: Referral: ${updatedUser.referralType?.name || "None"}, Loyalty: ${updatedUser.loyaltyType?.name || "None"}`,
+      updatedUser._id,
+      updatedUser.name,
+    )
+
+    res.json({
+      _id: updatedUser._id,
+      name: updatedUser.name,
+      email: updatedUser.email,
+      referralType: updatedUser.referralType,
+      loyaltyType: updatedUser.loyaltyType,
+    })
+  }),
+)
+
+// @desc    Get all reviews
+// @route   GET /api/admin/reviews
+// @access  Private/Admin
+router.get("/reviews", protect, admin, async (req, res) => {
+  try {
+    console.log("🔍 Admin reviews route accessed by:", req.user.email)
+
+    const page = Number.parseInt(req.query.page) || 1
+    const limit = Number.parseInt(req.query.limit) || 10
+    const status = req.query.status
+    const search = req.query.search
+
+    // Build query
+    const query = {}
+
+    if (status && status !== "all") {
+      query.status = status
+    }
+
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } },
+        { comment: { $regex: search, $options: "i" } },
+      ]
+    }
+
+    // Get total count
+    const totalReviews = await Review.countDocuments(query)
+    console.log("📈 Total reviews found:", totalReviews)
+
+    // Get reviews with pagination
+    const reviews = await Review.find(query)
+      .populate("product", "name price images")
+      .sort({ createdAt: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+
+    console.log("📋 Raw reviews from DB:", reviews.length)
+
+    // Process reviews and debug images
+    const processedReviews = reviews.map((review) => {
+      const reviewObj = review.toObject()
+
+      // Debug image field
+      console.log("🖼️ Review image field:", {
+        reviewId: reviewObj._id,
+        image: reviewObj.image,
+        imageType: typeof reviewObj.image,
+      })
+
+      // Add different image URL formats for testing
+      if (reviewObj.image) {
+        reviewObj.imageDebug = {
+          original: reviewObj.image,
+          url1: `/uploads/reviews/${reviewObj.image}`,
+          url2: `/uploads/${reviewObj.image}`,
+          url3: reviewObj.image.startsWith("/") ? reviewObj.image : `/uploads/reviews/${reviewObj.image}`,
+          fullUrl: `http://localhost:5000/uploads/reviews/${reviewObj.image}`,
+        }
+      }
+
+      return reviewObj
+    })
+
+    // Calculate stats
+    const stats = {
+      total: await Review.countDocuments(),
+      pending: await Review.countDocuments({ status: "pending" }),
+      approved: await Review.countDocuments({ status: "approved" }),
+      rejected: await Review.countDocuments({ status: "rejected" }),
+    }
+
+    res.json({
+      success: true,
+      reviews: processedReviews,
+      stats,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(totalReviews / limit),
+        totalReviews,
+        hasNextPage: page < Math.ceil(totalReviews / limit),
+        hasPrevPage: page > 1,
+      },
+    })
+  } catch (error) {
+    console.error("❌ Error in admin reviews route:", error)
+    res.status(500).json({
+      success: false,
+      message: "Server error in reviews route",
+      error: error.message,
+    })
+  }
+})
+
+// @desc    Get review by ID (Admin)
+// @route   GET /api/admin/reviews/:id
+// @access  Private/Admin
+router.get("/reviews/:id", protect, admin, async (req, res) => {
+  try {
+    console.log("🔍 Getting review by ID:", req.params.id)
+
+    const review = await Review.findById(req.params.id).populate("product", "name price images")
+
+    if (!review) {
+      return res.status(404).json({
+        success: false,
+        message: "Review not found",
+      })
+    }
+
+    res.json({
+      success: true,
+      review,
+    })
+  } catch (error) {
+    console.error("❌ Error fetching review:", error)
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    })
+  }
+})
+
+// @desc    Approve review (Admin)
+// @route   PUT /api/admin/reviews/:id/approve
+// @access  Private/Admin
+router.put("/reviews/:id/approve", protect, admin, async (req, res) => {
+  try {
+    console.log("✅ Approving review:", req.params.id)
+
+    const review = await Review.findById(req.params.id)
+
+    if (!review) {
+      return res.status(404).json({
+        success: false,
+        message: "Review not found",
+      })
+    }
+
+    review.status = "approved"
+    review.adminNotes = req.body.adminNotes || ""
+    review.approvedAt = new Date()
+    review.approvedBy = req.user._id
+
+    await review.save()
+
+    // Log activity
+    await logActivity(req, "APPROVE", "REVIEWS", `Approved review by ${review.name} for product`, review._id, review.name)
+
+    res.json({
+      success: true,
+      message: "Review approved successfully",
+      review,
+    })
+  } catch (error) {
+    console.error("❌ Error approving review:", error)
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    })
+  }
+})
+
+// @desc    Reject review (Admin)
+// @route   PUT /api/admin/reviews/:id/reject
+// @access  Private/Admin
+router.put("/reviews/:id/reject", protect, admin, async (req, res) => {
+  try {
+    console.log("❌ Rejecting review:", req.params.id)
+
+    const review = await Review.findById(req.params.id)
+
+    if (!review) {
+      return res.status(404).json({
+        success: false,
+        message: "Review not found",
+      })
+    }
+
+    review.status = "rejected"
+    review.adminNotes = req.body.adminNotes || ""
+    review.rejectedAt = new Date()
+    review.rejectedBy = req.user._id
+
+    await review.save()
+
+    // Log activity
+    await logActivity(req, "REJECT", "REVIEWS", `Rejected review by ${review.name}`, review._id, review.name)
+
+    res.json({
+      success: true,
+      message: "Review rejected successfully",
+      review,
+    })
+  } catch (error) {
+    console.error("❌ Error rejecting review:", error)
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    })
+  }
+})
+
+// @desc    Delete review (Admin)
+// @route   DELETE /api/admin/reviews/:id
+// @access  Private/Admin
+router.delete("/reviews/:id", protect, admin, async (req, res) => {
+  try {
+    console.log("🗑️ Deleting review:", req.params.id)
+
+    const review = await Review.findById(req.params.id)
+
+    if (!review) {
+      return res.status(404).json({
+        success: false,
+        message: "Review not found",
+      })
+    }
+
+    const reviewName = review.name
+    const reviewId = review._id
+    await Review.findByIdAndDelete(req.params.id)
+
+    // Log activity
+    await logActivity(req, "DELETE", "REVIEWS", `Deleted review by ${reviewName}`, reviewId, reviewName)
+
+    res.json({
+      success: true,
+      message: "Review deleted successfully",
+    })
+  } catch (error) {
+    console.error("❌ Error deleting review:", error)
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    })
+  }
+})
+
+// @desc    Create order (Admin)
+// @route   POST /api/admin/orders
+// @access  Private/Admin
+router.post(
+  "/orders",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const {
+      userId,
+      orderItems,
+      deliveryType = "home",
+      shippingAddress,
+      pickupDetails,
+      paymentMethod = "Cash on Delivery",
+      actualPaymentMethod,
+      itemsPrice,
+      shippingPrice = 0,
+      taxPrice = 0,
+      taxRate,
+      discountAmount = 0,
+      paymentCharges = [],
+      showBankDetails = false,
+      totalPrice, // optional from client, will recompute below
+      customerNotes = "",
+      status = "New",
+      documentType = "order",
+      quotationStatus,
+      sendCustomerEmail = false,
+    } = req.body
+
+    if (!orderItems || !Array.isArray(orderItems) || orderItems.length === 0) {
+      res.status(400)
+      throw new Error("No order items")
+    }
+
+    // A document can be parked the moment it is raised, so an admin taking a
+    // price over the phone does not have to create it and then go and hold it.
+    // Converted is never a starting point -- it only ever means a real order was
+    // made from this document.
+    const normalizedQuotationStatus = quotationStatus === "Hold" ? "Hold" : "Draft"
+
+    const normalizedDocumentType = String(documentType || "order").trim().toLowerCase()
+    if (!["order", "quotation"].includes(normalizedDocumentType)) {
+      res.status(400)
+      throw new Error("Invalid documentType. Allowed values: order, quotation")
+    }
+
+    const normalizedOrderItems = orderItems.map((it) => ({
+      ...it,
+      name: it?.name || "Custom Item",
+      quantity: Number(it?.quantity) || 1,
+      price: Number(it?.price) || 0,
+      image: it?.image || "/placeholder.svg",
+      product: it?.product || undefined,
+    }))
+
+    // Compute itemsPrice if not provided
+    const computedItemsPrice =
+      typeof itemsPrice === "number"
+        ? itemsPrice
+        : normalizedOrderItems.reduce((sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1), 0)
+
+    // Any extra lines the admin added (handling, packing, surcharge...). Stored in the
+    // same shape as a storefront order's payment charges so the invoice renders them
+    // without a special case, and counted into the total here -- recomputing without
+    // them would quietly drop whatever the admin charged.
+    const normalizedPaymentCharges = (Array.isArray(paymentCharges) ? paymentCharges : [])
+      .map((charge) => ({
+        name: String(charge?.name || "").trim() || "Additional charges",
+        amount: Number(charge?.amount) || 0,
+      }))
+      .filter((charge) => charge.amount > 0)
+
+    const additionalChargesTotal = normalizedPaymentCharges.reduce((sum, c) => sum + c.amount, 0)
+
+    const computedTotal = Math.max(
+      0,
+      Number(computedItemsPrice || 0) +
+        Number(shippingPrice || 0) +
+        additionalChargesTotal +
+        Number(taxPrice || 0) -
+        Number(discountAmount || 0),
+    )
+
+    // A customer typed straight into the document has no account yet, which is
+    // why the user search on that screen could never find them again. Opening
+    // one here links the document to a real person, keeps their address for
+    // next time, and makes them searchable from the moment the first quotation
+    // is raised.
+    let customerAccount = null
+    if (!userId) {
+      const contact = deliveryType === "pickup" ? pickupDetails : shippingAddress
+      try {
+        customerAccount = await ensureCustomerAccount({
+          shipping: contact || {},
+          createdBy: req.user?._id,
+        })
+      } catch (accountError) {
+        // A document the admin has already priced must not be lost over the
+        // account, so this is reported and the document saved without one.
+        console.error("Failed to open a customer account for this document:", accountError)
+      }
+    }
+
+    const resolvedUserId = userId || customerAccount?.user?._id || null
+
+    // Normalize provided status to schema enum values
+    const allowedStatuses = Order.schema.path("status").enumValues || []
+    const normalizedStatus = allowedStatuses.find(
+      (s) => s.toLowerCase() === String(status || "New").trim().toLowerCase(),
+    ) || "New"
+
+    const order = new Order({
+      // Everything raised on the Create Order/Quotation screen is staged on the
+      // Recent Quotation page first -- including documents the admin started as
+      // an order. Nothing reaches the Orders queues until someone moves it
+      // across, so the warehouse never picks a document still being negotiated.
+      documentType: "quotation",
+      stagedAs: normalizedDocumentType,
+      quotationStatus: normalizedQuotationStatus,
+      orderItems: normalizedOrderItems,
+      user: resolvedUserId,
+      deliveryType,
+      shippingAddress: deliveryType === "home" ? shippingAddress : undefined,
+      pickupDetails: deliveryType === "pickup" ? pickupDetails : undefined,
+      paymentMethod,
+      actualPaymentMethod: actualPaymentMethod || 
+        (paymentMethod === "Cash on Delivery" || paymentMethod === "cod" ? "cod" : 
+         paymentMethod === "card" || paymentMethod === "Credit Card" ? "card" : 
+         paymentMethod === "tabby" ? "tabby" : 
+         paymentMethod === "tamara" ? "tamara" : "cod"),
+      itemsPrice: Number(computedItemsPrice.toFixed(2)),
+      shippingPrice: Number(Number(shippingPrice || 0).toFixed(2)),
+      taxPrice: Number(Number(taxPrice || 0).toFixed(2)),
+      taxRate: Number.isFinite(Number(taxRate)) ? Number(taxRate) : undefined,
+      paymentCharges: normalizedPaymentCharges,
+      showBankDetails: Boolean(showBankDetails),
+      discountAmount: Number(Number(discountAmount || 0).toFixed(2)), // special discount stored
+      totalPrice: Number((typeof totalPrice === "number" ? totalPrice : computedTotal).toFixed(2)),
+      customerNotes,
+      status: normalizedStatus,
+    })
+
+    const createdOrder = await order.save()
+    await createdOrder.populate("user", "name email")
+    await createdOrder.populate("orderItems.product", "name image sku")
+
+    if (sendCustomerEmail) {
+      try {
+        // Staged documents are not orders yet, whichever mode raised them, so
+        // the customer gets the quotation mail. The order-placed mail is sent
+        // by the convert route, at the point it really becomes an order.
+        await sendQuotationCreatedEmail(createdOrder)
+      } catch (emailError) {
+        console.error("Failed to send create-document email:", emailError)
+      }
+    }
+
+    // Log activity
+    await logActivity({
+      user: req.user,
+      action: "CREATE",
+      module: "ORDERS",
+      description: `Created ${normalizedDocumentType}: ${createdOrder.trackingId || createdOrder._id}`,
+      targetId: createdOrder._id,
+      targetName: createdOrder.trackingId || createdOrder._id.toString(),
+      req,
+    })
+
+    // The temp password is returned once, here, and never stored in readable
+    // form. If the admin does not pass it on the customer resets it like anyone
+    // else -- the account still exists and is still searchable.
+    res.status(201).json(
+      customerAccount?.created
+        ? {
+            ...createdOrder.toObject(),
+            customerAccount: {
+              created: true,
+              email: customerAccount.user.email,
+              tempPassword: customerAccount.tempPassword,
+            },
+          }
+        : createdOrder,
+    )
+  }),
+)
+
+// @desc    Get quotations (Admin)
+// @route   GET /api/admin/quotations
+// @access  Private/Admin
+router.get(
+  "/quotations",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const { search, quotationStatus } = req.query
+    const query = { ...QUOTATION_DOCUMENT_QUERY }
+
+    if (quotationStatus && quotationStatus !== "all") {
+      query.quotationStatus = quotationStatus
+    }
+
+    if (search) {
+      query.$or = [
+        { "shippingAddress.name": { $regex: search, $options: "i" } },
+        { "shippingAddress.email": { $regex: search, $options: "i" } },
+        { "pickupDetails.location": { $regex: search, $options: "i" } },
+      ]
+    }
+
+    const quotations = await Order.find(query)
+      .populate({ path: "user", select: "name email" })
+      .populate({
+        path: "orderItems.product",
+        select: "name image sku price offerPrice oldPrice discount",
+      })
+      .populate({ path: "convertedOrderId", select: "_id status createdAt" })
+      .sort({ createdAt: -1 })
+
+    res.json(quotations)
+  }),
+)
+
+// @desc    Get one staged document, to reopen it on the create screen
+// @route   GET /api/admin/quotations/:id
+// @access  Private/Admin
+router.get(
+  "/quotations/:id",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const quotation = await Order.findById(req.params.id)
+      .populate("user", "name email phone")
+      .populate("orderItems.product", "name image sku")
+
+    // Orders open here too. Everything the office raises is editable for its
+    // whole life, so the create screen has to be able to reopen a real order,
+    // not only a document still waiting in the staging list.
+    if (!quotation) {
+      res.status(404)
+      throw new Error("Document not found")
+    }
+
+    res.json(quotation)
+  }),
+)
+
+// @desc    Save changes to a staged document recalled onto the create screen
+// @route   PUT /api/admin/quotations/:id
+// @access  Private/Admin
+router.put(
+  "/quotations/:id",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const quotation = await Order.findById(req.params.id)
+
+    if (!quotation) {
+      res.status(404)
+      throw new Error("Document not found")
+    }
+
+    // A document stays editable for its whole life -- before it is moved to
+    // Orders, after it is moved, and once it is a live order. Editing a
+    // document that has already been converted used to be refused, because the
+    // paperwork would drift from what the warehouse is picking. It is allowed
+    // now, and the drift is prevented instead: the linked order is updated with
+    // the same changes further down, so the pair can never disagree.
+    const isLiveOrder = quotation.documentType === "order"
+
+    const {
+      userId,
+      orderItems,
+      shippingAddress,
+      deliveryType,
+      pickupDetails,
+      itemsPrice,
+      shippingPrice = 0,
+      taxPrice = 0,
+      taxRate,
+      discountAmount = 0,
+      totalPrice,
+      paymentMethod,
+      actualPaymentMethod,
+      documentType,
+      quotationStatus,
+      customerNotes,
+    } = req.body
+
+    if (!orderItems || !Array.isArray(orderItems) || orderItems.length === 0) {
+      res.status(400)
+      throw new Error("No order items")
+    }
+
+    const normalizedOrderItems = orderItems.map((it) => ({
+      ...it,
+      name: it?.name || "Custom Item",
+      quantity: Number(it?.quantity) || 1,
+      price: Number(it?.price) || 0,
+      image: it?.image || "/placeholder.svg",
+      product: it?.product || undefined,
+    }))
+
+    const computedItemsPrice =
+      typeof itemsPrice === "number"
+        ? itemsPrice
+        : normalizedOrderItems.reduce((sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1), 0)
+
+    const computedTotal = Math.max(
+      0,
+      Number(computedItemsPrice || 0) +
+        Number(shippingPrice || 0) +
+        Number(taxPrice || 0) -
+        Number(discountAmount || 0),
+    )
+
+    // Same as on create: a document edited into having a customer gets that
+    // customer an account, so they are searchable next time. An account already
+    // linked is left alone.
+    let customerAccount = null
+    if (!userId && !quotation.user) {
+      const contact = deliveryType === "pickup" ? pickupDetails : shippingAddress
+      try {
+        customerAccount = await ensureCustomerAccount({
+          shipping: contact || {},
+          createdBy: req.user?._id,
+        })
+      } catch (accountError) {
+        console.error("Failed to open a customer account for this document:", accountError)
+      }
+    }
+
+    quotation.user = userId || quotation.user || customerAccount?.user?._id || null
+    quotation.orderItems = normalizedOrderItems
+
+    // Only one half applies, and the other is cleared -- a document switched
+    // from delivery to collection must not keep a stale address, or the invoice
+    // would show both.
+    if (["home", "pickup"].includes(deliveryType)) {
+      quotation.deliveryType = deliveryType
+      if (deliveryType === "pickup") {
+        quotation.pickupDetails = pickupDetails || quotation.pickupDetails
+        quotation.shippingAddress = undefined
+      } else {
+        if (shippingAddress) quotation.shippingAddress = shippingAddress
+        quotation.pickupDetails = undefined
+      }
+    } else if (shippingAddress) {
+      quotation.shippingAddress = shippingAddress
+    }
+    quotation.itemsPrice = Number(Number(computedItemsPrice).toFixed(2))
+    quotation.shippingPrice = Number(Number(shippingPrice || 0).toFixed(2))
+    quotation.taxPrice = Number(Number(taxPrice || 0).toFixed(2))
+    if (Number.isFinite(Number(taxRate))) quotation.taxRate = Number(taxRate)
+    quotation.discountAmount = Number(Number(discountAmount || 0).toFixed(2))
+    quotation.totalPrice = Number((typeof totalPrice === "number" ? totalPrice : computedTotal).toFixed(2))
+    if (paymentMethod) quotation.paymentMethod = paymentMethod
+    if (actualPaymentMethod) quotation.actualPaymentMethod = actualPaymentMethod
+    if (customerNotes !== undefined) quotation.customerNotes = customerNotes
+
+    // Staging only. A live order has a real status in the Orders queues and is
+    // not a draft of anything, so neither field applies to it.
+    if (!isLiveOrder) {
+      // The admin may switch what the document is meant to become while editing it.
+      const nextDocumentType = String(documentType || "").trim().toLowerCase()
+      if (["order", "quotation"].includes(nextDocumentType)) quotation.stagedAs = nextDocumentType
+
+      // Saving normally releases a held document; "Save on Hold" parks it again.
+      // A document already moved to Orders stays Converted -- it is being
+      // corrected, not pushed back into the queue.
+      if (["Draft", "Hold"].includes(quotationStatus) && quotation.quotationStatus !== "Converted") {
+        quotation.quotationStatus = quotationStatus
+      }
+    }
+
+    const updated = await quotation.save()
+
+    // Editing a document that was already moved to Orders has to carry through
+    // to the order itself, or the warehouse picks the old contents while the
+    // paperwork shows the new ones. Everything the create screen can change is
+    // copied; the order keeps its own status, payment state and history.
+    if (!isLiveOrder && quotation.convertedOrderId) {
+      try {
+        const linkedOrder = await Order.findById(quotation.convertedOrderId)
+        if (linkedOrder) {
+          linkedOrder.user = quotation.user || null
+          linkedOrder.orderItems = normalizedOrderItems
+          linkedOrder.deliveryType = quotation.deliveryType
+          linkedOrder.shippingAddress = quotation.shippingAddress
+          linkedOrder.pickupDetails = quotation.pickupDetails
+          linkedOrder.itemsPrice = quotation.itemsPrice
+          linkedOrder.shippingPrice = quotation.shippingPrice
+          linkedOrder.taxPrice = quotation.taxPrice
+          linkedOrder.taxRate = quotation.taxRate
+          linkedOrder.discountAmount = quotation.discountAmount
+          linkedOrder.totalPrice = quotation.totalPrice
+          linkedOrder.paymentMethod = quotation.paymentMethod
+          linkedOrder.actualPaymentMethod = quotation.actualPaymentMethod
+          linkedOrder.customerNotes = quotation.customerNotes
+          await linkedOrder.save()
+        }
+      } catch (syncError) {
+        // The edit is saved either way; a silent divergence is the one outcome
+        // worth shouting about.
+        console.error("Failed to apply the edit to the linked order:", syncError)
+      }
+    }
+    await updated.populate("user", "name email")
+    await updated.populate("orderItems.product", "name image sku")
+
+    await logActivity({
+      user: req.user,
+      action: "UPDATE",
+      module: "ORDERS",
+      description: `Updated staged ${updated.stagedAs || "quotation"}: ${updated._id}`,
+      targetId: updated._id,
+      targetName: updated._id.toString(),
+      req,
+    })
+
+    res.json(
+      customerAccount?.created
+        ? {
+            ...updated.toObject(),
+            customerAccount: {
+              created: true,
+              email: customerAccount.user.email,
+              tempPassword: customerAccount.tempPassword,
+            },
+          }
+        : updated,
+    )
+  }),
+)
+
+// @desc    Put a quotation on hold, or release it back to draft
+// @route   PUT /api/admin/quotations/:id/status
+// @access  Private/Admin
+// @desc    Delete a quotation
+// @route   DELETE /api/admin/quotations/:id
+// @access  Private/Admin
+//
+// Soft delete, the same as an order: the row is marked "Deleted" and drops out of the
+// list rather than being destroyed, so a quotation removed by mistake can still be
+// recovered and nothing that references it is left dangling.
+router.delete(
+  "/quotations/:id",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const quotation = await Order.findOne({ _id: req.params.id, ...QUOTATION_DOCUMENT_QUERY })
+
+    if (!quotation) {
+      res.status(404)
+      throw new Error("Quotation not found")
+    }
+
+    quotation.status = "Deleted"
+    await quotation.save()
+
+    await logActivity(
+      req,
+      "DELETE",
+      "ORDERS",
+      `Deleted quotation #${String(quotation._id).slice(-6)}`,
+      quotation._id,
+      quotation.shippingAddress?.fullName || quotation.pickupDetails?.name || "Quotation",
+    )
+
+    res.json({ success: true, _id: quotation._id })
+  }),
+)
+
+router.put(
+  "/quotations/:id/status",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const { quotationStatus } = req.body || {}
+
+    // Converted is set by the convert route alone -- it is the record of a real
+    // order having been created, not a label an admin can apply by hand.
+    if (!["Draft", "Hold"].includes(quotationStatus)) {
+      res.status(400)
+      throw new Error("Invalid status. Allowed values: Draft, Hold")
+    }
+
+    const quotation = await Order.findById(req.params.id)
+    if (!quotation) {
+      res.status(404)
+      throw new Error("Quotation not found")
+    }
+    if (quotation.documentType !== "quotation") {
+      res.status(400)
+      throw new Error("Provided record is not a quotation")
+    }
+    if (quotation.quotationStatus === "Converted" || quotation.convertedOrderId) {
+      res.status(400)
+      throw new Error("This quotation has already been moved to Orders")
+    }
+
+    const previousStatus = quotation.quotationStatus || "Draft"
+    quotation.quotationStatus = quotationStatus
+    await quotation.save()
+    await quotation.populate("user", "name email")
+
+    await logActivity({
+      user: req.user,
+      action: "UPDATE",
+      module: "ORDERS",
+      description: `Quotation ${quotation._id} ${quotationStatus === "Hold" ? "put on hold" : "released to draft"}`,
+      targetId: quotation._id,
+      targetName: quotation._id.toString(),
+      previousData: { quotationStatus: previousStatus },
+      req,
+    })
+
+    res.json(quotation)
+  }),
+)
+
+// @desc    Convert quotation to order
+// @route   POST /api/admin/quotations/:id/convert
+// @access  Private/Admin
+router.post(
+  "/quotations/:id/convert",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const { sendCustomerEmail = false } = req.body || {}
+    const quotation = await Order.findById(req.params.id)
+
+    if (!quotation) {
+      res.status(404)
+      throw new Error("Quotation not found")
+    }
+    if (quotation.documentType !== "quotation") {
+      res.status(400)
+      throw new Error("Provided record is not a quotation")
+    }
+    if (quotation.quotationStatus === "Converted" || quotation.convertedOrderId) {
+      res.status(400)
+      throw new Error("Quotation already converted to order")
+    }
+
+    const newOrder = new Order({
+      documentType: "order",
+      sourceQuotationId: quotation._id,
+      user: quotation.user || null,
+      orderItems: (quotation.orderItems || []).map((it) => {
+        const rawItem = typeof it.toObject === "function" ? it.toObject() : it
+        return {
+          ...rawItem,
+          image: rawItem?.image || "/placeholder.svg",
+        }
+      }),
+      deliveryType: quotation.deliveryType || "home",
+      shippingAddress: quotation.shippingAddress,
+      pickupDetails: quotation.pickupDetails,
+      paymentMethod: quotation.paymentMethod || "Cash on Delivery",
+      actualPaymentMethod: quotation.actualPaymentMethod || null,
+      itemsPrice: quotation.itemsPrice || 0,
+      shippingPrice: quotation.shippingPrice || 0,
+      taxPrice: quotation.taxPrice || 0,
+      // Carried across so the order prints the same figures as the quotation it came
+      // from. Without the rate the invoice falls back to the store default, and
+      // without the charges the extra lines vanish while still being inside the total.
+      taxRate: quotation.taxRate,
+      showBankDetails: Boolean(quotation.showBankDetails),
+      paymentCharges: (quotation.paymentCharges || []).map((c) => ({
+        name: c?.name || "Additional charges",
+        amount: Number(c?.amount) || 0,
+      })),
+      discountAmount: quotation.discountAmount || 0,
+      totalPrice: quotation.totalPrice || 0,
+      customerNotes: quotation.customerNotes || "",
+      status: "New",
+      isPaid: false,
+    })
+
+    const createdOrder = await newOrder.save()
+
+    quotation.quotationStatus = "Converted"
+    quotation.convertedOrderId = createdOrder._id
+    quotation.convertedAt = new Date()
+    await quotation.save()
+
+    await createdOrder.populate("user", "name email")
+    await createdOrder.populate("orderItems.product", "name image sku")
+    await quotation.populate("convertedOrderId", "_id status createdAt")
+
+    if (sendCustomerEmail) {
+      try {
+        await sendOrderPlacedEmail(createdOrder)
+      } catch (emailError) {
+        console.error("Failed to send conversion order email:", emailError)
+      }
+    }
+
+    await logActivity({
+      user: req.user,
+      action: "CREATE",
+      module: "ORDERS",
+      description: `Converted quotation ${quotation._id} to order ${createdOrder._id}`,
+      targetId: createdOrder._id,
+      targetName: createdOrder._id.toString(),
+      previousData: {
+        quotationId: quotation._id.toString(),
+      },
+      req,
+    })
+
+    res.status(201).json({
+      order: createdOrder,
+      quotation,
+    })
+  }),
+)
+
+// Add a test route to verify admin routes are working
+router.get("/test-reviews", protect, admin, (req, res) => {
+  console.log("🧪 Test route accessed by:", req.user.email)
+  res.json({
+    success: true,
+    message: "Admin review routes are working!",
+    user: req.user.email,
+    timestamp: new Date(),
+  })
+})
+
+// @desc    Get critical orders (unpaid card/tabby/tamara payments)
+// @route   GET /api/admin/orders/critical
+// @access  Private/Admin
+router.get(
+  "/orders/critical",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    // Find orders where:
+    // 1. Payment method is card, tabby, or tamara (not COD)
+    // 2. Order is NOT paid
+    // These are orders where customer attempted to pay but transaction failed
+    const criticalOrders = await Order.find({
+      $and: [
+        ORDER_DOCUMENT_QUERY,
+        { isPaid: false }, // Not paid
+        { status: { $ne: "Deleted" } }, // Not deleted
+        { status: { $ne: "Cancelled" } }, // Not cancelled (optional - you might want to include cancelled too)
+        {
+          $or: [
+            { actualPaymentMethod: { $in: ["card", "tabby", "tamara"] } },
+            { paymentMethod: { $in: ["card", "tabby", "tamara", "Credit Card", "Debit Card"] } },
+          ],
+        },
+      ],
+    })
+      .populate({ path: "user", select: "name email" })
+      .populate({
+        path: "orderItems.product",
+        select: "name image sku price offerPrice oldPrice discount",
+      })
+      .sort({ createdAt: -1 })
+
+    console.log(`[CRITICAL ORDERS] Found ${criticalOrders.length} critical orders`)
+    res.json(criticalOrders)
+  }),
+)
+
+export default router

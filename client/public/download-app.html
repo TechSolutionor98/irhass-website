@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Get the Irhaas App</title>
+    <meta name="theme-color" content="#84cc16" />
+    <meta name="description" content="Download the Irhaas app — shop electronics, gaming and more across the UAE with app-only deals, fast delivery and secure payments." />
+    <meta name="robots" content="noindex" />
+
+    <meta property="og:title" content="Get the Irhaas App" />
+    <meta property="og:description" content="Shop electronics, gaming and more with app-only deals." />
+    <meta property="og:image" content="/g.png" />
+
+    <style>
+      :root {
+        --lime: #65a30d;
+        --lime-600: #4d7c0f;
+        --ink: #0f172a;
+        --muted: #64748b;
+      }
+      * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+      html, body { margin: 0; padding: 0; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        color: var(--ink);
+        min-height: 100dvh;
+        background:
+          radial-gradient(1200px 500px at 50% -10%, #d9f99d 0%, rgba(217, 249, 157, 0) 60%),
+          linear-gradient(180deg, #f7fee7 0%, #ffffff 45%);
+        display: flex;
+        justify-content: center;
+        padding: 28px 18px calc(28px + env(safe-area-inset-bottom));
+      }
+      .wrap { width: 100%; max-width: 460px; }
+
+      .brand {
+        display: flex; align-items: center; justify-content: center; gap: 10px;
+        margin-bottom: 22px;
+      }
+      .brand img { height: 30px; width: auto; }
+
+      .hero { text-align: center; }
+      .icon {
+        width: 104px; height: 104px; margin: 0 auto 16px;
+        background: #fff; border-radius: 26px;
+        box-shadow: 0 12px 30px rgba(101, 163, 13, 0.25), 0 2px 8px rgba(0,0,0,0.06);
+        display: flex; align-items: center; justify-content: center;
+        border: 1px solid #ecfccb;
+      }
+      .icon img { width: 74px; height: 74px; object-fit: contain; }
+
+      h1 { font-size: 26px; line-height: 1.2; margin: 4px 0 6px; letter-spacing: -0.02em; }
+      h1 .g { color: var(--lime); }
+      .sub { color: var(--muted); font-size: 15px; margin: 0 auto 14px; max-width: 340px; }
+
+      .meta {
+        display: flex; align-items: center; justify-content: center; gap: 14px;
+        color: var(--muted); font-size: 13px; margin-bottom: 22px; flex-wrap: wrap;
+      }
+      .meta b { color: var(--ink); }
+      .stars { color: #f59e0b; letter-spacing: 1px; }
+      .dot { width: 4px; height: 4px; border-radius: 50%; background: #cbd5e1; }
+
+      .stores { display: flex; flex-direction: column; gap: 12px; }
+      .store {
+        position: relative; display: flex; align-items: center; gap: 14px;
+        background: #fff; border: 1.5px solid #e2e8f0; border-radius: 16px;
+        padding: 14px 16px; text-decoration: none; color: var(--ink);
+        transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease;
+      }
+      .store:active { transform: scale(0.98); }
+      .store.reco { border-color: var(--lime); box-shadow: 0 8px 20px rgba(101,163,13,0.14); }
+      .store .badge { height: 46px; width: auto; flex-shrink: 0; }
+      .store .txt { text-align: left; line-height: 1.25; }
+      .store .txt .k { font-size: 12px; color: var(--muted); }
+      .store .txt .v { font-size: 16px; font-weight: 800; }
+      .store .go { margin-left: auto; color: var(--muted); font-size: 20px; }
+      .reco-tag {
+        position: absolute; top: -10px; left: 16px;
+        background: var(--lime); color: #fff; font-size: 11px; font-weight: 800;
+        padding: 3px 9px; border-radius: 999px; letter-spacing: .01em;
+      }
+
+      .features {
+        margin: 24px 0 6px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+      }
+      .feat {
+        background: #fff; border: 1px solid #eef2f7; border-radius: 14px;
+        padding: 12px 8px; text-align: center;
+      }
+      .feat .fi { font-size: 20px; }
+      .feat .ft { font-size: 11.5px; color: var(--muted); margin-top: 4px; font-weight: 600; }
+
+      .foot { text-align: center; color: #94a3b8; font-size: 12px; margin-top: 22px; }
+      .foot a { color: var(--lime-600); text-decoration: none; font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="brand">
+        <img src="/logo.png" alt="Irhaas" onerror="this.style.display='none'" />
+      </div>
+
+      <div class="hero">
+        <div class="icon">
+          <img src="/g.png" alt="Irhaas app" onerror="this.parentElement.style.display='none'" />
+        </div>
+        <h1>Get the <span class="g">Irhaas</span> App</h1>
+        <p class="sub">Shop electronics, gaming &amp; more across the UAE — with app-only deals, faster checkout and order tracking.</p>
+
+        <div class="meta">
+          <span><span class="stars">★★★★★</span> <b>4.8</b></span>
+          <span class="dot"></span>
+          <span><b>Free</b> to download</span>
+          <span class="dot"></span>
+          <span>UAE 🇦🇪</span>
+        </div>
+      </div>
+
+      <div class="stores" id="stores">
+        <a class="store" id="ios" href="https://apps.apple.com/pk/app/irhaas/id6742447046">
+          <img class="badge" src="/getitonappstore.png" alt="Download on the App Store" onerror="this.style.display='none'" />
+          <span class="txt"><span class="k">Download for</span><span class="v">iPhone &amp; iPad</span></span>
+          <span class="go">›</span>
+        </a>
+        <a class="store" id="android" href="https://play.google.com/store/apps/details?id=ae.grabatoz1.grabatoz1">
+          <img class="badge" src="/getitongoogle.png" alt="Get it on Google Play" onerror="this.style.display='none'" />
+          <span class="txt"><span class="k">Download for</span><span class="v">Android</span></span>
+          <span class="go">›</span>
+        </a>
+      </div>
+
+      <div class="features">
+        <div class="feat"><div class="fi">🚚</div><div class="ft">Fast delivery</div></div>
+        <div class="feat"><div class="fi">🔒</div><div class="ft">Secure payments</div></div>
+        <div class="feat"><div class="fi">🏷️</div><div class="ft">App-only deals</div></div>
+      </div>
+
+      <p class="foot">
+        Not sure? Visit <a href="https://www.irhaas.com">irhaas.com</a>
+      </p>
+    </div>
+
+    <script>
+      (function () {
+        var ua = navigator.userAgent || navigator.vendor || window.opera || "";
+        var isIOS =
+          /iPad|iPhone|iPod/.test(ua) ||
+          (/(Macintosh)/.test(ua) && "ontouchend" in document);
+        var isAndroid = /android/i.test(ua);
+
+        var stores = document.getElementById("stores");
+        var ios = document.getElementById("ios");
+        var android = document.getElementById("android");
+
+        function recommend(el) {
+          if (!el) return;
+          el.classList.add("reco");
+          var tag = document.createElement("span");
+          tag.className = "reco-tag";
+          tag.textContent = "Recommended for your device";
+          el.appendChild(tag);
+          // Put the recommended store first.
+          stores.insertBefore(el, stores.firstChild);
+        }
+
+        if (isAndroid) recommend(android);
+        else if (isIOS) recommend(ios);
+      })();
+    </script>
+  </body>
+</html>
