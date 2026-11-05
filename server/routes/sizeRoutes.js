@@ -37,13 +37,21 @@ router.post(
   protect,
   admin,
   asyncHandler(async (req, res) => {
-    const { name, code, category, sortOrder } = req.body
+    const { name, code, category, sortOrder, isActive, status } = req.body
+
+    const activeStatus =
+      isActive !== undefined
+        ? (isActive === true || isActive === "true")
+        : status !== undefined
+          ? status === "active"
+          : true
 
     const size = new Size({
       name,
       code,
-      category,
-      sortOrder,
+      category: category || "clothing",
+      sortOrder: Number(sortOrder) || 0,
+      isActive: activeStatus,
       createdBy: req.user._id,
     })
 
@@ -63,13 +71,17 @@ router.put(
     const size = await Size.findById(req.params.id)
 
     if (size) {
-      const { name, code, category, sortOrder, isActive } = req.body
+      const { name, code, category, sortOrder, isActive, status } = req.body
 
       size.name = name || size.name
       size.code = code || size.code
       size.category = category || size.category
-      size.sortOrder = sortOrder !== undefined ? sortOrder : size.sortOrder
-      size.isActive = isActive !== undefined ? isActive : size.isActive
+      size.sortOrder = sortOrder !== undefined ? Number(sortOrder) : size.sortOrder
+      if (isActive !== undefined) {
+        size.isActive = isActive === true || isActive === "true"
+      } else if (status !== undefined) {
+        size.isActive = status === "active"
+      }
 
       const updatedSize = await size.save()
       res.json(updatedSize)
@@ -91,7 +103,8 @@ router.delete(
     const size = await Size.findById(req.params.id)
 
     if (size) {
-      await size.deleteOne()
+      size.isDeleted = true
+      await size.save()
       res.json({ message: "Size removed" })
     } else {
       res.status(404)

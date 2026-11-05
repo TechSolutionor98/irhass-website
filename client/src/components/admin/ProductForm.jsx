@@ -7,7 +7,7 @@ import axios from "axios"
 import ImageUpload from "../ImageUpload"
 import VideoUpload from "../VideoUpload"
 import TipTapEditor from "../TipTapEditor"
-import { Plus, X } from "lucide-react"
+import { Plus, X, Ruler } from "lucide-react"
 import ProductVariationModal from "./ProductVariationModal"
 import ColorVariationForm from "./ColorVariationForm"
 import DosVariationForm from "./DosVariationForm"
@@ -162,6 +162,10 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
   
   // DOS/Windows Variations
   const [dosVariations, setDosVariations] = useState([])
+
+  // Product Sizes & Size-Based Pricing
+  const [availableSizes, setAvailableSizes] = useState([])
+  const [selectedProductSizes, setSelectedProductSizes] = useState([])
   
   // Video Source Type (upload or youtube)
   const [videoSourceType, setVideoSourceType] = useState("youtube") // 'upload' | 'youtube'
@@ -223,6 +227,20 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
   }, [])
 
   // Fetch taxes from backend
+  useEffect(() => {
+    const fetchSizes = async () => {
+      try {
+        const { data } = await axios.get(`${config.API_URL}/api/sizes`)
+        if (Array.isArray(data)) {
+          setAvailableSizes(data.filter((s) => s.isActive !== false))
+        }
+      } catch (error) {
+        console.error("Failed to load sizes:", error)
+      }
+    }
+    fetchSizes()
+  }, [])
+
   useEffect(() => {
     const fetchTaxes = async () => {
       try {
@@ -327,6 +345,20 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
       // Set DOS/Windows variations if they exist
       if (product.dosVariations && product.dosVariations.length > 0) {
         setDosVariations(product.dosVariations)
+      }
+
+      // Set product sizes if they exist
+      if (product.sizes && Array.isArray(product.sizes) && product.sizes.length > 0) {
+        setSelectedProductSizes(
+          product.sizes.map((s) => ({
+            sizeId: s.size?._id || s.size || s._id || "",
+            name: s.name || s.size?.name || "",
+            code: s.code || s.size?.code || "",
+            additionalPrice: s.additionalPrice !== undefined ? s.additionalPrice : 0,
+          }))
+        )
+      } else {
+        setSelectedProductSizes([])
       }
 
       const preload = async () => {
@@ -948,6 +980,39 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
     }))
   }
 
+  const toggleSizeSelection = (sizeObj) => {
+    const sizeId = sizeObj._id
+    const isAlreadySelected = selectedProductSizes.some(
+      (s) => s.sizeId === sizeId || (s.code && s.code.toLowerCase() === sizeObj.code.toLowerCase())
+    )
+    if (isAlreadySelected) {
+      setSelectedProductSizes((prev) =>
+        prev.filter((s) => s.sizeId !== sizeId && s.code.toLowerCase() !== sizeObj.code.toLowerCase())
+      )
+    } else {
+      setSelectedProductSizes((prev) => [
+        ...prev,
+        {
+          sizeId: sizeObj._id,
+          name: sizeObj.name,
+          code: sizeObj.code,
+          additionalPrice: 0,
+        },
+      ])
+    }
+  }
+
+  const handleSizeAdditionalPriceChange = (index, value) => {
+    const numVal = value === "" ? "" : Math.max(0, Number.parseFloat(value) || 0)
+    setSelectedProductSizes((prev) =>
+      prev.map((item, i) => (i === index ? { ...item, additionalPrice: numVal } : item))
+    )
+  }
+
+  const removeSelectedProductSize = (index) => {
+    setSelectedProductSizes((prev) => prev.filter((_, i) => i !== index))
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setLoading(true)
@@ -1035,6 +1100,12 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
         selfAvailableModelText: selfAvailableModelText || "",
         colorVariations: colorVariations, // Add color variations array
         dosVariations: dosVariations, // Add DOS/Windows variations array
+        sizes: selectedProductSizes.map((s) => ({
+          size: s.sizeId || undefined,
+          name: s.name || "",
+          code: s.code || "",
+          additionalPrice: Number(s.additionalPrice) || 0,
+        })),
         // SEO fields
         seoTitle: formData.seoTitle || "",
         seoDescription: formData.seoDescription || "",
@@ -2426,6 +2497,157 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
             dosVariations={dosVariations}
             onChange={setDosVariations}
           />
+        </div>
+
+        {/* Product Sizes & Size-Based Pricing Section */}
+        <div className="bg-gradient-to-br from-amber-50/80 to-orange-50/80 rounded-lg p-6 border border-amber-300 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-300 flex items-center justify-center text-amber-700">
+                <Ruler size={22} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">Product Sizes &amp; Size-Based Pricing</h3>
+                <p className="text-xs text-gray-600">
+                  Select available sizes for this product. You can configure individual additional prices for each size (e.g., +200 PKR for XL).
+                </p>
+              </div>
+            </div>
+            <div>
+              <span className="text-xs bg-amber-100 text-amber-800 font-semibold px-3 py-1 rounded-full border border-amber-200">
+                {selectedProductSizes.length} {selectedProductSizes.length === 1 ? "Size" : "Sizes"} Selected
+              </span>
+            </div>
+          </div>
+
+          {/* Available Sizes from Size Management */}
+          <div className="mb-5 bg-white/80 p-4 rounded-lg border border-amber-200">
+            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">
+              Available Active Sizes (Click to assign/unassign)
+            </label>
+            {availableSizes.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {availableSizes.map((sizeObj) => {
+                  const isSelected = selectedProductSizes.some(
+                    (s) => s.sizeId === sizeObj._id || (s.code && s.code.toLowerCase() === sizeObj.code.toLowerCase())
+                  )
+                  return (
+                    <button
+                      key={sizeObj._id}
+                      type="button"
+                      onClick={() => toggleSizeSelection(sizeObj)}
+                      className={`px-3.5 py-2 rounded-md text-sm font-semibold border transition-all flex items-center gap-2 ${
+                        isSelected
+                          ? "bg-amber-600 text-white border-amber-700 shadow-sm ring-2 ring-amber-300"
+                          : "bg-white text-gray-700 border-gray-300 hover:border-amber-400 hover:bg-amber-50/50"
+                      }`}
+                    >
+                      <span>{sizeObj.name}</span>
+                      <span
+                        className={`text-xs px-1.5 py-0.5 rounded font-mono ${
+                          isSelected ? "bg-amber-800 text-amber-100" : "bg-gray-100 text-gray-600"
+                        }`}
+                      >
+                        {sizeObj.code}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="p-3 bg-gray-50 rounded border border-dashed border-gray-300 text-sm text-gray-500 text-center">
+                No active sizes found. Go to <span className="font-semibold text-gray-800">Product System &gt; Sizes</span> to add sizes.
+              </div>
+            )}
+          </div>
+
+          {/* Size-Based Pricing Configuration Table */}
+          {selectedProductSizes.length > 0 && (
+            <div className="bg-white rounded-lg border border-amber-200 overflow-hidden shadow-sm">
+              <div className="px-4 py-3 bg-amber-50/50 border-b border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <h4 className="text-xs font-bold text-amber-900 uppercase tracking-wider">
+                  Configured Sizes &amp; Additional Prices
+                </h4>
+                <div className="text-xs text-amber-800 bg-amber-100/70 px-2.5 py-1 rounded border border-amber-200">
+                  Pricing Formula: <span className="font-semibold">Final Price = Base Product Price + Selected Size's Additional Price</span>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 text-sm">
+                  <thead className="bg-gray-50 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                    <tr>
+                      <th className="px-4 py-3 text-left">Size Name</th>
+                      <th className="px-4 py-3 text-left">Code</th>
+                      <th className="px-4 py-3 text-left">Base Price</th>
+                      <th className="px-4 py-3 text-left">Additional Price (+PKR)</th>
+                      <th className="px-4 py-3 text-left">Final Calculated Price</th>
+                      <th className="px-4 py-3 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 bg-white">
+                    {selectedProductSizes.map((s, index) => {
+                      const effectiveBase =
+                        originalOfferPrice !== "" && Number(originalOfferPrice) > 0
+                          ? Number(originalOfferPrice)
+                          : Number(basePrice) || Number(formData.price) || 0
+                      const addPrice = Number(s.additionalPrice) || 0
+                      const finalCalculated = effectiveBase + addPrice
+
+                      return (
+                        <tr key={s.sizeId || index} className="hover:bg-amber-50/30 transition-colors">
+                          <td className="px-4 py-3 whitespace-nowrap font-medium text-gray-900">
+                            {s.name}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <span className="font-mono text-xs font-semibold bg-gray-100 text-gray-700 px-2 py-0.5 rounded border border-gray-200">
+                              {s.code}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-gray-600">
+                            Rs {effectiveBase.toLocaleString()}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <div className="flex items-center space-x-1 max-w-[170px]">
+                              <span className="text-gray-500 font-medium text-xs">+ Rs</span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                value={s.additionalPrice}
+                                onChange={(e) => handleSizeAdditionalPriceChange(index, e.target.value)}
+                                placeholder="0"
+                                className="w-full px-2.5 py-1 text-sm font-semibold border border-gray-300 rounded focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                              />
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <span className="font-bold text-green-700 text-base">
+                              Rs {finalCalculated.toLocaleString()}
+                            </span>
+                            {addPrice > 0 && (
+                              <span className="ml-1.5 text-xs text-amber-700 font-medium">
+                                (+Rs {addPrice})
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-right">
+                            <button
+                              type="button"
+                              onClick={() => removeSelectedProductSize(index)}
+                              className="text-red-500 hover:text-red-700 p-1.5 rounded hover:bg-red-50 transition-colors"
+                              title="Remove Size"
+                            >
+                              <X size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* SEO Settings Section */}

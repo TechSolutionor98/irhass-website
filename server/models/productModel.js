@@ -466,6 +466,26 @@ const productSchema = mongoose.Schema(
         },
       },
     ],
+    sizes: [
+      {
+        size: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Size",
+        },
+        name: {
+          type: String,
+          default: "",
+        },
+        code: {
+          type: String,
+          default: "",
+        },
+        additionalPrice: {
+          type: Number,
+          default: 0,
+        },
+      },
+    ],
     variationsDisplayType: {
       type: String,
       enum: ["button", "card"],

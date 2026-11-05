@@ -174,6 +174,7 @@ const ProductDetails = () => {
   const [selectedImage, setSelectedImage] = useState(0)
   const [selectedColorIndex, setSelectedColorIndex] = useState(null)
   const [selectedDosIndex, setSelectedDosIndex] = useState(null)
+  const [selectedSizeIndex, setSelectedSizeIndex] = useState(null)
   const [showImageModal, setShowImageModal] = useState(false)
   const [modalImageIndex, setModalImageIndex] = useState(0)
   const [isImageZoomed, setIsImageZoomed] = useState(false)
@@ -332,6 +333,14 @@ const ProductDetails = () => {
     return null
   }
 
+  // Get current Size variation
+  const getCurrentSize = () => {
+    if (selectedSizeIndex !== null && product?.sizes && product.sizes.length > 0) {
+      return product.sizes[selectedSizeIndex] || null
+    }
+    return null
+  }
+
   // Helper function to check if a URL is a YouTube URL
   const isYouTubeUrl = (url) => {
     if (!url) return false
@@ -409,6 +418,7 @@ const ProductDetails = () => {
   const getEffectivePrice = () => {
     const currentColor = getCurrentColor()
     const currentDos = getCurrentDos()
+    const currentSize = getCurrentSize()
     
     // Get base price (from color if selected, otherwise from product)
     let basePrice = 0
@@ -428,6 +438,11 @@ const ProductDetails = () => {
       const dosOfferPrice = Number(currentDos.offerPrice) || 0
       const dosPrice = (dosOfferPrice > 0 && dosOfferPrice < dosBasePrice) ? dosOfferPrice : dosBasePrice
       basePrice += dosPrice
+    }
+
+    // Add selected size additional price if selected (additive)
+    if (currentSize && Number(currentSize.additionalPrice) > 0) {
+      basePrice += Number(currentSize.additionalPrice) || 0
     }
     
     return basePrice
@@ -941,6 +956,11 @@ const ProductDetails = () => {
       showToast("Product is out of stock", "error")
       return false
     }
+
+    if (product.sizes && product.sizes.length > 0 && selectedSizeIndex === null) {
+      showToast("Please select a size", "error")
+      return false
+    }
     
     // Calculate the final price based on variations:
     // If color is selected: use color price as base
@@ -962,6 +982,12 @@ const ProductDetails = () => {
       const dosPrice = currentDos.offerPrice > 0 ? currentDos.offerPrice : currentDos.price
       finalPrice += Number(dosPrice) || 0
     }
+
+    // Add Size additional price if selected (additive)
+    const currentSize = getCurrentSize()
+    if (currentSize && Number(currentSize.additionalPrice) > 0) {
+      finalPrice += Number(currentSize.additionalPrice) || 0
+    }
     
     // Prepare product with variation data
     const productToAdd = {
@@ -982,7 +1008,14 @@ const ProductDetails = () => {
         offerPrice: currentDos.offerPrice,
         sku: currentDos.sku,
       } : null,
-      // Final calculated price (color/product base + DOS if selected)
+      selectedSizeIndex,
+      selectedSizeData: currentSize ? {
+        sizeId: currentSize.size?._id || currentSize.size || currentSize._id,
+        name: currentSize.name,
+        code: currentSize.code,
+        additionalPrice: Number(currentSize.additionalPrice) || 0,
+      } : null,
+      // Final calculated price (color/product base + DOS + Size if selected)
       // Clear offerPrice so CartContext uses 'price' as the effective price
       price: finalPrice,
       offerPrice: 0, // Reset so computeUnit uses price field
@@ -2846,6 +2879,7 @@ const ProductDetails = () => {
               <div className="mt-3" itemProp="offers" itemScope itemType="https://schema.org/Offer">
                 {(() => {
                   const currentColor = getCurrentColor()
+                  const currentSize = getCurrentSize()
                   let basePrice = 0
                   let offerPrice = 0
 
@@ -2855,6 +2889,12 @@ const ProductDetails = () => {
                   } else {
                     basePrice = Number(product.price) || 0
                     offerPrice = Number(product.offerPrice) || 0
+                  }
+
+                  const sizeAdditional = currentSize && Number(currentSize.additionalPrice) > 0 ? Number(currentSize.additionalPrice) : 0
+                  basePrice += sizeAdditional
+                  if (offerPrice > 0) {
+                    offerPrice += sizeAdditional
                   }
 
                   const hasValidOffer = offerPrice > 0 && basePrice > 0 && offerPrice < basePrice
@@ -3011,6 +3051,38 @@ const ProductDetails = () => {
               </div>
 
               <div className="mt-6" />
+
+              {/* Product Sizes */}
+              {product.sizes && product.sizes.length > 0 && (
+                <div className="mb-6">
+                  <div className="mb-2.5">
+                    <h3 className="text-sm uppercase tracking-[0.1em] font-bold text-stone-900">
+                      <TranslatedText>Size</TranslatedText>
+                    </h3>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    {product.sizes.map((sizeItem, index) => {
+                      const isSelected = selectedSizeIndex === index
+                      const displayLabel = sizeItem.code || sizeItem.name
+                      return (
+                        <button
+                          key={sizeItem._id || index}
+                          type="button"
+                          onClick={() => setSelectedSizeIndex(index)}
+                          className={`min-w-[46px] h-10 px-4 rounded border text-sm font-semibold transition-all duration-200 flex items-center justify-center ${
+                            isSelected
+                              ? "border-stone-900 bg-stone-900 text-white shadow-sm ring-2 ring-stone-900/20"
+                              : "border-stone-300 bg-white text-stone-800 hover:border-stone-500 hover:bg-stone-50"
+                          }`}
+                        >
+                          {displayLabel}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Color Variations */}
               {product.colorVariations && product.colorVariations.length > 0 && (
                 <div className="mb-6">

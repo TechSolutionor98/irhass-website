@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useToast } from "../../context/ToastContext"
 import AdminSidebar from "../../components/admin/AdminSidebar"
+import config from "../../config/config"
 
 const AddSize = () => {
   const navigate = useNavigate()
@@ -30,14 +31,21 @@ const AddSize = () => {
     setLoading(true)
 
     try {
-      const token = localStorage.getItem("adminToken")
-      const response = await fetch("/api/sizes", {
+      const token =
+        localStorage.getItem("adminToken") || localStorage.getItem("token") || localStorage.getItem("authToken")
+      const response = await fetch(`${config.API_URL}/api/sizes`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          name: formData.name,
+          code: formData.code,
+          category: formData.category,
+          sortOrder: Number(formData.sortOrder) || 0,
+          isActive: formData.status === "active",
+        }),
       })
 
       if (response.ok) {

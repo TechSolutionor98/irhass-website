@@ -2177,6 +2177,17 @@ router.post(
       }
     }
 
+    if (productData.sizes && Array.isArray(productData.sizes)) {
+      productData.sizes = productData.sizes
+        .map((s) => ({
+          size: s.size || s.sizeId || s._id || undefined,
+          name: String(s.name || "").trim(),
+          code: String(s.code || "").trim(),
+          additionalPrice: Number(s.additionalPrice) >= 0 ? Number(s.additionalPrice) : 0,
+        }))
+        .filter((s) => s.size || s.name || s.code)
+    }
+
     const product = new Product({
       ...productData,
       nameAr,
@@ -2421,6 +2432,20 @@ router.put(
           }
         }
         updateData.gtin = newGTIN
+      }
+
+      // Normalize sizes if provided
+      if (updateData.sizes !== undefined) {
+        updateData.sizes = Array.isArray(updateData.sizes)
+          ? updateData.sizes
+              .map((s) => ({
+                size: s.size || s.sizeId || s._id || undefined,
+                name: String(s.name || "").trim(),
+                code: String(s.code || "").trim(),
+                additionalPrice: Number(s.additionalPrice) >= 0 ? Number(s.additionalPrice) : 0,
+              }))
+              .filter((s) => s.size || s.name || s.code)
+          : []
       }
 
       // Update product fields
@@ -2788,6 +2813,7 @@ router.post(
       specifications: product.specifications,
       colorVariations: product.colorVariations || [],
       dosVariations: product.dosVariations || [],
+      sizes: product.sizes || [],
       // Link to original product and all its existing variations
       variations: Array.from(variationGroupIds).map(id => ({
         product: id,

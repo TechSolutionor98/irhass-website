@@ -501,8 +501,16 @@ const Cart = () => {
                   </h3>
                 </Link>
                 <p className="mt-0.5 text-xs sm:text-sm text-gray-500">{item.brand?.name || "N/A"}</p>
-                {(item.selectedColorData || item.selectedDosData || isInBundle) && (
+                {(item.selectedColorData || item.selectedDosData || item.selectedSizeData || isInBundle) && (
                   <div className="mt-2 flex flex-wrap gap-1.5">
+                    {item.selectedSizeData && (
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-800 font-medium">
+                        <TranslatedText>Size</TranslatedText>: {item.selectedSizeData.code || item.selectedSizeData.name}
+                        {Number(item.selectedSizeData.additionalPrice) > 0 && (
+                          <span className="text-amber-600 font-normal">(+{formatPrice(item.selectedSizeData.additionalPrice)})</span>
+                        )}
+                      </span>
+                    )}
                     {item.selectedColorData && (
                       <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs text-gray-700">
                         <span

@@ -197,10 +197,11 @@ const CartDrawer = () => {
 
                         <p className="mt-1 text-sm text-stone-900">{formatPrice(line)}</p>
 
-                        {/* Variant line: whichever of colour / option / bundle applies. */}
-                        {(item.selectedColorData || item.selectedDosData || item.bundleId) && (
+                        {/* Variant line: whichever of size / colour / option / bundle applies. */}
+                        {(item.selectedColorData || item.selectedDosData || item.selectedSizeData || item.bundleId) && (
                           <p className="mt-1 text-xs uppercase tracking-[0.1em] text-stone-500">
                             {[
+                              item.selectedSizeData ? `Size: ${item.selectedSizeData.code || item.selectedSizeData.name}` : null,
                               item.selectedColorData?.color,
                               item.selectedDosData?.dosType,
                               item.bundleId ? "Bundle" : null,

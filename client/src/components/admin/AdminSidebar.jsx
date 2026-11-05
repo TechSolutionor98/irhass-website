@@ -831,6 +831,9 @@ const AdminSidebar = () => {
       
       // Check permission for item
       if (item.permission) {
+        if (item.permission === "sizes") {
+          return hasPermission("sizes") || hasPermission("products")
+        }
         return hasPermission(item.permission)
       }
 

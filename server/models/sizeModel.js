@@ -15,7 +15,7 @@ const sizeSchema = mongoose.Schema(
     category: {
       type: String,
       required: true,
-      enum: ["clothing", "shoes", "accessories", "electronics"],
+      enum: ["clothing", "shoes", "accessories", "electronics", "general", "other"],
       default: "clothing",
     },
     sortOrder: {
@@ -25,6 +25,10 @@ const sizeSchema = mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true,
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
     },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,

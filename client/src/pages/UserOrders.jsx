@@ -680,6 +680,11 @@ const UserOrders = () => {
                                       </Link>
                                       <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm">
                                         <span className="text-gray-500">Qty: <span className="font-medium text-gray-900">{item.quantity}</span></span>
+                                        {item.selectedSizeData && (
+                                          <span className="text-gray-500">
+                                            Size: <span className="font-medium text-gray-900">{item.selectedSizeData.code || item.selectedSizeData.name}</span>
+                                          </span>
+                                        )}
                                         {item.selectedColorData?.color && (
                                           <span className="text-gray-500 flex items-center gap-1">
                                             Color: 

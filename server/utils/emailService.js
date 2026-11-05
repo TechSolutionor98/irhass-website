@@ -993,13 +993,14 @@ const getEmailTemplate = (type, data) => {
                 const name = (it.product && (it.product.name || it.product.title)) || it.name || 'Item'
                 const rawImg = (it.product && it.product.image) || it.image
                 const imgSrc = toAbsoluteUrl(rawImg)
-                const colorInfo = it.selectedColorData && it.selectedColorData.colorName ? `<br><span style="font-size:12px;color:#7c3aed;">Color: ${it.selectedColorData.colorName}</span>` : ''
+                const sizeInfo = it.selectedSizeData && (it.selectedSizeData.code || it.selectedSizeData.name) ? `<br><span style="font-size:12px;color:#d97706;">Size: ${it.selectedSizeData.code || it.selectedSizeData.name}</span>` : ''
+                const colorInfo = it.selectedColorData && (it.selectedColorData.color || it.selectedColorData.colorName) ? `<br><span style="font-size:12px;color:#7c3aed;">Color: ${it.selectedColorData.color || it.selectedColorData.colorName}</span>` : ''
                 const dosInfo = it.selectedDosData && it.selectedDosData.dosType ? `<br><span style="font-size:12px;color:#2563eb;">OS: ${it.selectedDosData.dosType}</span>` : ''
                 return `<tr>
                   <td class="img-cell" data-label="Image" style="width:56px;">
                     <img src="${imgSrc}" alt="${name}" width="56" height="56" style="display:block;width:56px;height:56px;max-width:56px;max-height:56px;object-fit:cover;border-radius:8px;background:#fff;border:1px solid #ddd;" />
                   </td>
-                  <td data-label="Item">${name}${colorInfo}${dosInfo}</td>
+                  <td data-label="Item">${name}${sizeInfo}${colorInfo}${dosInfo}</td>
                   <td data-label="Qty">${Number(it.quantity)||1}</td>
                   <td data-label="Price" class="text-right">${(Number(it.price)||0).toFixed(2)}</td>
                 </tr>`
@@ -1712,13 +1713,14 @@ const getAdminOrderNotificationTemplate = (data) => {
       const quantity = Number(item.quantity) || 1
       const unitPrice = Number(item.price) || 0
       const lineTotal = quantity * unitPrice
+      const size = item.selectedSizeData ? ` | Size: ${item.selectedSizeData.code || item.selectedSizeData.name}` : ""
       const color = item.selectedColorData?.color ? ` | Color: ${item.selectedColorData.color}` : ""
       const os = item.selectedDosData?.dosType ? ` | OS: ${item.selectedDosData.dosType}` : ""
 
       return `
         <tr>
           <td style="padding:8px;border:1px solid #ddd;">${index + 1}</td>
-          <td style="padding:8px;border:1px solid #ddd;">${escapeHtml(name)}${escapeHtml(color)}${escapeHtml(os)}</td>
+          <td style="padding:8px;border:1px solid #ddd;">${escapeHtml(name)}${escapeHtml(size)}${escapeHtml(color)}${escapeHtml(os)}</td>
           <td style="padding:8px;border:1px solid #ddd;text-align:center;">${quantity}</td>
           <td style="padding:8px;border:1px solid #ddd;text-align:right;">${formatCurrency(unitPrice)}</td>
           <td style="padding:8px;border:1px solid #ddd;text-align:right;">${formatCurrency(lineTotal)}</td>

@@ -615,12 +615,15 @@ export const CartProvider = ({ children }) => {
         console.log("Previous cart items:", prevItems.length)
 
         const existingItemIndex = prevItems.findIndex((item) => {
+          const sameColor = item.selectedColorIndex === product.selectedColorIndex
+          const sameDos = item.selectedDosIndex === product.selectedDosIndex
+          const sameSize = (item.selectedSizeData?.code || "") === (product.selectedSizeData?.code || "")
           // For bundle items, match both product ID and bundle ID
           if (bundleId && item.bundleId) {
-            return item._id === product._id && item.bundleId === bundleId && item.selectedColorIndex === product.selectedColorIndex && item.selectedDosIndex === product.selectedDosIndex
+            return item._id === product._id && item.bundleId === bundleId && sameColor && sameDos && sameSize
           }
-          // For regular items, match product ID, no bundle, and same color/DOS (if any)
-          return item._id === product._id && !item.bundleId && item.selectedColorIndex === product.selectedColorIndex && item.selectedDosIndex === product.selectedDosIndex
+          // For regular items, match product ID, no bundle, and same color/DOS/Size (if any)
+          return item._id === product._id && !item.bundleId && sameColor && sameDos && sameSize
         })
 
         if (existingItemIndex > -1) {
@@ -639,7 +642,7 @@ export const CartProvider = ({ children }) => {
           const cartItem = {
             ...product,
             quantity,
-            cartId: `${product._id}_${bundleId || "regular"}_${product.selectedColorIndex ?? "nocolor"}_${product.selectedDosIndex ?? "nodos"}_${Date.now()}`,
+            cartId: `${product._id}_${bundleId || "regular"}_${product.selectedColorIndex ?? "nocolor"}_${product.selectedDosIndex ?? "nodos"}_${product.selectedSizeData?.code || "nosize"}_${Date.now()}`,
             bundleId: bundleId || null,
             isBundleItem: product.isBundleItem || false,
             bundleDiscount: product.bundleDiscount || false,
@@ -649,6 +652,8 @@ export const CartProvider = ({ children }) => {
             selectedColorData: product.selectedColorData || null,
             selectedDosIndex: product.selectedDosIndex ?? null,
             selectedDosData: product.selectedDosData || null,
+            selectedSizeIndex: product.selectedSizeIndex ?? null,
+            selectedSizeData: product.selectedSizeData || null,
           }
 
           return [...prevItems, cartItem]

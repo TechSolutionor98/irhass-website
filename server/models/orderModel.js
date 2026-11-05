@@ -100,6 +100,14 @@ const orderSchema = mongoose.Schema(
           offerPrice: { type: Number },
           sku: { type: String },
         },
+        // Size variation data
+        selectedSizeIndex: { type: Number, default: null },
+        selectedSizeData: {
+          sizeId: { type: mongoose.Schema.Types.ObjectId, ref: "Size" },
+          name: { type: String },
+          code: { type: String },
+          additionalPrice: { type: Number, default: 0 },
+        },
         // Buyer protection fields
         isProtection: { type: Boolean, default: false },
         protectionFor: {

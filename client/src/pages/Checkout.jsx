@@ -930,6 +930,17 @@ const Checkout = () => {
               sku: item.selectedDosData.sku,
             }
           }
+
+          // Add size variation data if present
+          if (item.selectedSizeData) {
+            orderItem.selectedSizeIndex = item.selectedSizeIndex
+            orderItem.selectedSizeData = {
+              sizeId: item.selectedSizeData.sizeId,
+              name: item.selectedSizeData.name,
+              code: item.selectedSizeData.code,
+              additionalPrice: Number(item.selectedSizeData.additionalPrice) || 0,
+            }
+          }
           
           // Handle buyer protection items separately
           if (item.isProtection) {
@@ -1287,6 +1298,17 @@ const Checkout = () => {
               price: item.selectedDosData.price,
               offerPrice: item.selectedDosData.offerPrice,
               sku: item.selectedDosData.sku,
+            }
+          }
+
+          // Add size variation data if present
+          if (item.selectedSizeData) {
+            orderItem.selectedSizeIndex = item.selectedSizeIndex
+            orderItem.selectedSizeData = {
+              sizeId: item.selectedSizeData.sizeId,
+              name: item.selectedSizeData.name,
+              code: item.selectedSizeData.code,
+              additionalPrice: Number(item.selectedSizeData.additionalPrice) || 0,
             }
           }
           
@@ -2711,6 +2733,14 @@ const Checkout = () => {
                         <p className="pr-8 text-sm font-semibold text-gray-900 line-clamp-2">
                           <TranslatedText text={item.name} />
                         </p>
+                        {item.selectedSizeData && (
+                          <p className="mt-0.5 text-xs text-amber-700 font-medium">
+                            <TranslatedText>Size:</TranslatedText> {item.selectedSizeData.code || item.selectedSizeData.name}
+                            {Number(item.selectedSizeData.additionalPrice) > 0 && (
+                              <span className="text-amber-600 font-normal"> (+{formatPrice(item.selectedSizeData.additionalPrice)})</span>
+                            )}
+                          </p>
+                        )}
                         {item.selectedColorData && (
                           <p className="mt-0.5 text-xs text-purple-600 font-medium">
                             <TranslatedText>Color:</TranslatedText> {item.selectedColorData.color}
@@ -2864,13 +2894,17 @@ const Checkout = () => {
               <ul className="mb-6 space-y-4">
                 {cartItems.map((item) => {
                   const unit = Number(item.offerPrice) > 0 ? Number(item.offerPrice) : Number(item.price) || 0
-                  const variant = [item.selectedColorData?.color, item.selectedDosData?.dosType]
+                  const variant = [
+                    item.selectedSizeData ? `Size: ${item.selectedSizeData.code || item.selectedSizeData.name}` : null,
+                    item.selectedColorData?.color,
+                    item.selectedDosData?.dosType,
+                  ]
                     .filter(Boolean)
                     .join(" / ")
 
                   return (
                     <li
-                      key={`${item._id}-${item.bundleId || "solo"}-${item.selectedColorIndex ?? "x"}`}
+                      key={`${item._id}-${item.bundleId || "solo"}-${item.selectedColorIndex ?? "x"}-${item.selectedSizeData?.code || "nosize"}`}
                       className="flex items-start gap-4"
                     >
                       <div className="relative flex-shrink-0">

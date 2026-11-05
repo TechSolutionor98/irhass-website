@@ -599,12 +599,31 @@ const AddProduct = () => {
     }))
   }
 
-  const handleSizeChange = (sizeId) => {
+  const handleSizeChange = (sizeObj) => {
+    setFormData((prev) => {
+      const exists = prev.selectedSizes.some((s) => (s.sizeId || s) === sizeObj._id)
+      return {
+        ...prev,
+        selectedSizes: exists
+          ? prev.selectedSizes.filter((s) => (s.sizeId || s) !== sizeObj._id)
+          : [
+              ...prev.selectedSizes,
+              {
+                sizeId: sizeObj._id,
+                name: sizeObj.name,
+                code: sizeObj.code,
+                additionalPrice: 0,
+              },
+            ],
+      }
+    })
+  }
+
+  const handleSizeAdditionalPriceChange = (index, value) => {
+    const numVal = value === "" ? "" : Math.max(0, Number.parseFloat(value) || 0)
     setFormData((prev) => ({
       ...prev,
-      selectedSizes: prev.selectedSizes.includes(sizeId)
-        ? prev.selectedSizes.filter((id) => id !== sizeId)
-        : [...prev.selectedSizes, sizeId],
+      selectedSizes: prev.selectedSizes.map((item, i) => (i === index ? { ...item, additionalPrice: numVal } : item)),
     }))
   }
 
@@ -674,7 +693,12 @@ const AddProduct = () => {
         warranty: formData.warranty,
         volume: formData.volume,
         colors: formData.selectedColors,
-        sizes: formData.selectedSizes,
+        sizes: (formData.selectedSizes || []).map((s) => ({
+          size: s.sizeId || s,
+          name: s.name || "",
+          code: s.code || "",
+          additionalPrice: Number(s.additionalPrice) || 0,
+        })),
         weight: Number.parseFloat(formData.weight) || 0,
         tags: formData.tags ? formData.tags.split(",").map((tag) => tag.trim()) : [],
         shortDescription: formData.shortDescription,
@@ -1283,28 +1307,95 @@ const AddProduct = () => {
               )}
             </div>
 
-            {/* Sizes */}
+            {/* Sizes & Size-Based Pricing */}
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-6">Sizes (Select Multiple)</h2>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">Product Sizes &amp; Size-Based Pricing</h2>
+                  <p className="text-xs text-gray-500">
+                    Select sizes available for this product and configure size-based price adjustments.
+                  </p>
+                </div>
+                <span className="text-xs bg-amber-100 text-amber-800 font-semibold px-2.5 py-1 rounded-full">
+                  {(formData.selectedSizes || []).length} Selected
+                </span>
+              </div>
+
               {sizes.length > 0 ? (
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                  {sizes.map((size) => (
-                    <div key={size._id} className="flex items-center space-x-2">
-                      <input
-                        type="checkbox"
-                        id={`size-${size._id}`}
-                        checked={formData.selectedSizes.includes(size._id)}
-                        onChange={() => handleSizeChange(size._id)}
-                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                      />
-                      <label htmlFor={`size-${size._id}`} className="text-sm text-gray-700">
-                        {size.name}
-                      </label>
+                <div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-4">
+                    {sizes.map((size) => {
+                      const isSelected = (formData.selectedSizes || []).some(
+                        (s) => (s.sizeId || s) === size._id || (s.code && s.code === size.code)
+                      )
+                      return (
+                        <div
+                          key={size._id}
+                          onClick={() => handleSizeChange(size)}
+                          className={`cursor-pointer p-2.5 rounded-lg border text-sm font-medium transition-all flex items-center justify-between ${
+                            isSelected
+                              ? "border-amber-600 bg-amber-50 text-amber-900 shadow-sm"
+                              : "border-gray-200 hover:border-gray-300 text-gray-700 bg-white"
+                          }`}
+                        >
+                          <span>{size.name}</span>
+                          <span className="text-xs font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">
+                            {size.code}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {(formData.selectedSizes || []).length > 0 && (
+                    <div className="mt-4 border rounded-lg overflow-hidden">
+                      <table className="min-w-full divide-y divide-gray-200 text-sm">
+                        <thead className="bg-gray-50 text-xs font-semibold text-gray-500 uppercase">
+                          <tr>
+                            <th className="px-4 py-2 text-left">Size</th>
+                            <th className="px-4 py-2 text-left">Base Price</th>
+                            <th className="px-4 py-2 text-left">Additional Price (+PKR)</th>
+                            <th className="px-4 py-2 text-left">Final Price</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {formData.selectedSizes.map((s, index) => {
+                            const baseP = Number(formData.offerPrice) > 0 ? Number(formData.offerPrice) : Number(formData.price) || 0
+                            const addP = Number(s.additionalPrice) || 0
+                            return (
+                              <tr key={s.sizeId || index}>
+                                <td className="px-4 py-2 font-medium">
+                                  {s.name} ({s.code})
+                                </td>
+                                <td className="px-4 py-2 text-gray-500">
+                                  Rs {baseP.toLocaleString()}
+                                </td>
+                                <td className="px-4 py-2">
+                                  <div className="flex items-center space-x-1 max-w-[140px]">
+                                    <span className="text-xs text-gray-400">+ Rs</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={s.additionalPrice}
+                                      onChange={(e) => handleSizeAdditionalPriceChange(index, e.target.value)}
+                                      placeholder="0"
+                                      className="w-full px-2 py-1 text-sm border rounded focus:ring-1 focus:ring-amber-500"
+                                    />
+                                  </div>
+                                </td>
+                                <td className="px-4 py-2 font-bold text-green-700">
+                                  Rs {(baseP + addP).toLocaleString()}
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
                     </div>
-                  ))}
+                  )}
                 </div>
               ) : (
-                <div className="text-gray-500 text-center py-4">No sizes available. Please add sizes first.</div>
+                <div className="text-gray-500 text-center py-4 text-sm">No sizes available. Please add sizes first.</div>
               )}
             </div>
 
