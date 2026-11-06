@@ -10,7 +10,7 @@ const asyncMainCssPlugin = () => ({
   enforce: 'post',
   transformIndexHtml(html) {
     return html.replace(
-      /<link rel="stylesheet"([^>]*href="\/assets\/index-[^"]+\.css"[^>]*)>/g,
+      /<link rel="stylesheet"([^>]*href="\/assets\/(app|index)-[^"]+\.css"[^>]*)>/g,
       '<link rel="preload" as="style"$1 onload="this.onload=null;this.rel=\'stylesheet\'"><noscript><link rel="stylesheet"$1></noscript>',
     )
   },

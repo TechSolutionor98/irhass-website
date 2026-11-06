@@ -25,17 +25,27 @@ const ALL_PRESETS_MAP = new Map([
   ["PK", { nameAr: "باكستان", currencySymbol: "Rs", currencySymbolAr: "روپیہ" }],
 ])
 
+const COUNTRIES_CACHE_KEY = "irhaas_countries_cache_v1"
+
 export const CurrencyProvider = ({ children }) => {
-  const [countries, setCountries] = useState(DEFAULT_COUNTRIES)
+  const [countries, setCountries] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem(COUNTRIES_CACHE_KEY)
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed
+      }
+    } catch {}
+    return DEFAULT_COUNTRIES
+  })
   const [selectedCountryCode, setSelectedCountryCode] = useState(() => {
     return localStorage.getItem("selected-country-code") || "AE"
   })
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
 
   // Fetch active countries from public API
   const fetchCountries = useCallback(async () => {
     try {
-      setLoading(true)
       const res = await axios.get(`${config.API_URL}/api/countries/public`)
       if (Array.isArray(res.data) && res.data.length > 0) {
         // Only include countries active in backend API
@@ -48,6 +58,9 @@ export const CurrencyProvider = ({ children }) => {
           }
         })
         setCountries(activeList)
+        try {
+          sessionStorage.setItem(COUNTRIES_CACHE_KEY, JSON.stringify(activeList))
+        } catch {}
       }
     } catch (err) {
       console.warn("Failed to fetch active countries, using defaults:", err.message)

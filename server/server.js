@@ -1,5 +1,6 @@
 import express from "express"
 import cors from "cors"
+import compression from "compression"
 import dotenv from "dotenv"
 import path from "path"
 import { fileURLToPath } from "url"
@@ -223,6 +224,17 @@ app.use("/api/payment/tamara/webhook", captureRawBody, webhookRateLimit, authent
 // check lives in the route, keyed to the app secret stored in the database.
 app.use("/api/whatsapp/webhook", captureRawBody, webhookRateLimit)
 
+// Response compression for all API and static responses (gzip/deflate for payloads > 1KB)
+app.use(
+  compression({
+    threshold: 1024,
+    filter: (req, res) => {
+      if (req.headers["x-no-compression"]) return false
+      return compression.filter(req, res)
+    },
+  }),
+)
+
 // Body parser middleware
 app.use(express.json({ limit: "50mb" }))
 app.use(express.urlencoded({ extended: true, limit: "50mb" }))
@@ -235,8 +247,22 @@ app.use(autoInvalidateAllCacheOnMutation())
 
 // Catalogue reads are the same for everyone, so let Cloudflare and the browser
 // hold on to them. Without this every visitor re-downloads the whole category
-// tree on every page.
-app.use(["/api/categories", "/api/subcategories", "/api/brands", "/api/banners", "/api/home-sections"], publicCache)
+// tree and homepage payload on every page.
+app.use(
+  [
+    "/api/homepage",
+    "/api/categories",
+    "/api/subcategories",
+    "/api/brands",
+    "/api/banners",
+    "/api/home-sections",
+    "/api/products",
+    "/api/theme",
+    "/api/settings",
+    "/api/countries",
+  ],
+  publicCache,
+)
 
 // Routes
 app.use("/api/users", userRoutes)

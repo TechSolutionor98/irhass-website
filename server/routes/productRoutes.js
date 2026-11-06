@@ -1871,6 +1871,7 @@ router.put(
 // @access  Public
 router.get(
   "/:id",
+  cacheMiddleware("products"),
   asyncHandler(async (req, res) => {
     const product = await Product.findById(req.params.id)
       .populate("category", "name nameAr slug")
@@ -1895,6 +1896,7 @@ router.get(
 // @access  Public
 router.get(
   "/slug/:slug",
+  cacheMiddleware("products"),
   asyncHandler(async (req, res) => {
     const rawSlug = typeof req.params.slug === "string" ? req.params.slug : ""
     let decodedSlug = rawSlug

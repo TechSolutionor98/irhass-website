@@ -348,30 +348,8 @@ const Home = () => {
           mobileData = Array.isArray(bannerGroups.mobile) ? bannerGroups.mobile : []
           homeBannersData = Array.isArray(bannerGroups.home) ? bannerGroups.home : []
 
-          const needsBannerHydration =
-            homeBannersData.length === 0 ||
-            homeBannersData.some(
-              (banner) =>
-                !String(banner?.section || "").trim() || !String(banner?.deviceType || "").trim(),
-            )
-
-          if (needsBannerHydration) {
-            try {
-              const { data: activeBannersRaw } = await axios.get(`${API_BASE_URL}/api/banners?active=true`)
-              const activeBanners = Array.isArray(activeBannersRaw) ? activeBannersRaw : []
-
-              if (activeBanners.length > 0) {
-                heroData = activeBanners.filter((banner) => banner.position === "hero")
-                promotionalBanners = activeBanners.filter((banner) => banner.position === "promotional")
-                mobileData = activeBanners.filter((banner) => banner.position === "mobile")
-                homeBannersData = activeBanners.filter(
-                  (banner) => banner.position && banner.position.startsWith("home-") && banner.isActive,
-                )
-              }
-            } catch (bannerHydrationError) {
-              console.warn("Banner hydration fallback failed:", bannerHydrationError)
-            }
-          }
+          // Only hydrate banners if homepage payload completely missed banners
+          const needsBannerHydration = !homePayload.banners && heroData.length === 0
 
           settingsData = homePayload.settings || defaultSettings
           sectionsData = Array.isArray(homePayload.homeSections) ? homePayload.homeSections : []
@@ -539,50 +517,7 @@ const Home = () => {
     fetchData()
   }, [])
 
-  // Infinite loop pixel-based auto-scroll for brands
-  useEffect(() => {
-    if (!brands.length) return
-    let animationFrameId
-    let lastTimestamp = null
-    const speed = 0.5 // px per frame, adjust for faster/slower scroll
 
-    function step(timestamp) {
-      if (!lastTimestamp) lastTimestamp = timestamp
-      const elapsed = timestamp - lastTimestamp
-      lastTimestamp = timestamp
-      if (!sliderRef.current) return
-      const track = sliderRef.current
-      const totalWidth = track.scrollWidth / 2 // width of one set
-      const nextScrollX = scrollX + speed
-      if (nextScrollX >= totalWidth) {
-        // Instantly reset to the start (no animation)
-        track.style.transition = "none"
-        setScrollX(0)
-        // Force reflow, then restore transition
-        setTimeout(() => {
-          if (track) track.style.transition = "transform 0.3s linear"
-        }, 20)
-        animationFrameId = requestAnimationFrame(step)
-        return
-      }
-      setScrollX(nextScrollX)
-      animationFrameId = requestAnimationFrame(step)
-    }
-
-    if (isAutoScrolling) {
-      animationFrameId = requestAnimationFrame(step)
-    }
-    return () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId)
-    }
-    // eslint-disable-next-line
-  }, [brands.length, isAutoScrolling, scrollX])
-
-  useEffect(() => {
-    if (sliderRef.current) {
-      sliderRef.current.style.transform = `translateX(-${scrollX}px)`
-    }
-  }, [scrollX])
 
   // Handle infinite loop transitions
   useEffect(() => {

@@ -26,8 +26,8 @@ import { Helmet } from "react-helmet-async"
 import { useLocation } from "react-router-dom"
 
 // Import pages
-import Home from "./pages/Home"
-import NotFound from "./pages/NotFound"
+const Home = lazyWithRetry(() => import("./pages/Home"))
+const NotFound = lazyWithRetry(() => import("./pages/NotFound"))
 
 const Shop = lazyWithRetry(() => import("./pages/Shop"))
 const ProductDetails = lazyWithRetry(() => import("./pages/ProductDetails"))
