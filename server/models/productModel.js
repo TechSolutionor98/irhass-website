@@ -484,6 +484,11 @@ const productSchema = mongoose.Schema(
           type: Number,
           default: 0,
         },
+        countInStock: {
+          type: Number,
+          default: 0,
+          min: 0,
+        },
       },
     ],
     variationsDisplayType: {

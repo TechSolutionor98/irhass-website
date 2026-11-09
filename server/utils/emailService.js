@@ -900,17 +900,17 @@ const getEmailTemplate = (type, data) => {
         if (!status) return statusSteps[0]
         const normalized = status.trim().toLowerCase()
         // Map legacy initial statuses to Order Placed for customer-facing display
-        if (["new", "new order", "order placed"].includes(normalized)) return statusSteps.find(s=>s.key==="Order Placed")
-        if (["processing", "in process", "order processing"].includes(normalized)) return statusSteps.find(s=>s.key==="Order Processing")
-        if (["on hold", "on-hold", "hold"].includes(normalized)) return statusSteps.find(s=>s.key==="On Hold")
-        if (["confirmed", "confirm"].includes(normalized)) return statusSteps.find(s=>s.key==="Confirmed")
-        if (["ready for shipment", "ready for shipping", "ready to ship", "rts"].includes(normalized)) return statusSteps.find(s=>s.key==="Ready for Shipment")
-        if (["shipped", "dispatched", "dispatch"].includes(normalized)) return statusSteps.find(s=>s.key==="Shipped")
-        if (["on the way", "on-the-way"].includes(normalized)) return statusSteps.find(s=>s.key==="On the Way")
-        if (["out for delivery", "out of delivery", "out-of-delivery"].includes(normalized)) return statusSteps.find(s=>s.key==="Out for Delivery")
-        if (["delivered"].includes(normalized)) return statusSteps.find(s=>s.key==="Delivered")
-        if (["cancelled", "canceled"].includes(normalized)) return statusSteps.find(s=>s.key==="Cancelled")
-        return statusSteps.find(s=>s.key==="Order Placed")
+        if (["new", "new order", "order placed"].includes(normalized)) return statusSteps.find(s => s.key === "Order Placed")
+        if (["processing", "in process", "order processing"].includes(normalized)) return statusSteps.find(s => s.key === "Order Processing")
+        if (["on hold", "on-hold", "hold"].includes(normalized)) return statusSteps.find(s => s.key === "On Hold")
+        if (["confirmed", "confirm"].includes(normalized)) return statusSteps.find(s => s.key === "Confirmed")
+        if (["ready for shipment", "ready for shipping", "ready to ship", "rts"].includes(normalized)) return statusSteps.find(s => s.key === "Ready for Shipment")
+        if (["shipped", "dispatched", "dispatch"].includes(normalized)) return statusSteps.find(s => s.key === "Shipped")
+        if (["on the way", "on-the-way"].includes(normalized)) return statusSteps.find(s => s.key === "On the Way")
+        if (["out for delivery", "out of delivery", "out-of-delivery"].includes(normalized)) return statusSteps.find(s => s.key === "Out for Delivery")
+        if (["delivered"].includes(normalized)) return statusSteps.find(s => s.key === "Delivered")
+        if (["cancelled", "canceled"].includes(normalized)) return statusSteps.find(s => s.key === "Cancelled")
+        return statusSteps.find(s => s.key === "Order Placed")
       }
       const currentStep = getCurrentStep(data.status)
 
@@ -989,22 +989,22 @@ const getEmailTemplate = (type, data) => {
             </thead>
             <tbody>
               ${orderItemsList.map(it => {
-                const lineTotal = (Number(it.price)||0) * (Number(it.quantity)||1)
-                const name = (it.product && (it.product.name || it.product.title)) || it.name || 'Item'
-                const rawImg = (it.product && it.product.image) || it.image
-                const imgSrc = toAbsoluteUrl(rawImg)
-                const sizeInfo = it.selectedSizeData && (it.selectedSizeData.code || it.selectedSizeData.name) ? `<br><span style="font-size:12px;color:#d97706;">Size: ${it.selectedSizeData.code || it.selectedSizeData.name}</span>` : ''
-                const colorInfo = it.selectedColorData && (it.selectedColorData.color || it.selectedColorData.colorName) ? `<br><span style="font-size:12px;color:#7c3aed;">Color: ${it.selectedColorData.color || it.selectedColorData.colorName}</span>` : ''
-                const dosInfo = it.selectedDosData && it.selectedDosData.dosType ? `<br><span style="font-size:12px;color:#2563eb;">OS: ${it.selectedDosData.dosType}</span>` : ''
-                return `<tr>
+        const lineTotal = (Number(it.price) || 0) * (Number(it.quantity) || 1)
+        const name = (it.product && (it.product.name || it.product.title)) || it.name || 'Item'
+        const rawImg = (it.product && it.product.image) || it.image
+        const imgSrc = toAbsoluteUrl(rawImg)
+        const sizeInfo = it.selectedSizeData && (it.selectedSizeData.code || it.selectedSizeData.name) ? `<br><span style="font-size:12px;color:#d97706;">Size: ${it.selectedSizeData.code || it.selectedSizeData.name}</span>` : ''
+        const colorInfo = it.selectedColorData && (it.selectedColorData.color || it.selectedColorData.colorName) ? `<br><span style="font-size:12px;color:#7c3aed;">Color: ${it.selectedColorData.color || it.selectedColorData.colorName}</span>` : ''
+        const dosInfo = it.selectedDosData && it.selectedDosData.dosType ? `<br><span style="font-size:12px;color:#2563eb;">OS: ${it.selectedDosData.dosType}</span>` : ''
+        return `<tr>
                   <td class="img-cell" data-label="Image" style="width:56px;">
                     <img src="${imgSrc}" alt="${name}" width="56" height="56" style="display:block;width:56px;height:56px;max-width:56px;max-height:56px;object-fit:cover;border-radius:8px;background:#fff;border:1px solid #ddd;" />
                   </td>
                   <td data-label="Item">${name}${sizeInfo}${colorInfo}${dosInfo}</td>
-                  <td data-label="Qty">${Number(it.quantity)||1}</td>
-                  <td data-label="Price" class="text-right">${(Number(it.price)||0).toFixed(2)}</td>
+                  <td data-label="Qty">${Number(it.quantity) || 1}</td>
+                  <td data-label="Price" class="text-right">${(Number(it.price) || 0).toFixed(2)}</td>
                 </tr>`
-              }).join('')}
+      }).join('')}
             </tbody>
             <tfoot>
               <tr>
@@ -1698,9 +1698,9 @@ const getAdminOrderNotificationTemplate = (data) => {
 
   const shippingAddress = data.shippingAddress
     ? `${data.shippingAddress.address || ""}, ${data.shippingAddress.city || ""}, ${data.shippingAddress.state || ""}, ${data.shippingAddress.zipCode || ""}`
-        .replace(/,\s*,/g, ",")
-        .replace(/^,\s*|\s*,$/g, "")
-        .trim() || "N/A"
+      .replace(/,\s*,/g, ",")
+      .replace(/^,\s*|\s*,$/g, "")
+      .trim() || "N/A"
     : "N/A"
 
   const pickupLocation = data.pickupDetails?.location || "N/A"
@@ -1978,10 +1978,10 @@ export const sendOrderStatusUpdateEmail = async (order) => {
     const sendToCustomer = normalizedStatus !== "deleted"
 
     const orderNumber = order._id.toString().slice(-6)
-    
+
     // Get customer name - works for both guest and logged-in users
     const customerName = order.shippingAddress?.name || order.pickupDetails?.name || order.user?.name || "Customer"
-    
+
     // Get customer email - works for both guest and logged-in users
     // Priority: shippingAddress.email > pickupDetails.email > user.email
     const customerEmail = order.shippingAddress?.email || order.pickupDetails?.email || order.user?.email
@@ -2021,7 +2021,7 @@ export const sendOrderStatusUpdateEmail = async (order) => {
       .replace(/<div class="order-summary">[\s\S]*?<\/div>\s*/g, '')
       // Remove summary rows if present standalone
       .replace(/<div class="summary-row[^"]*">[\s\S]*?<\/div>\s*/g, '')
-    
+
     // Debug marker to ensure minimal template is deployed
     console.log('[sendOrderStatusUpdateEmail] Template length:', sanitizedHtml.length)
     console.log('[sendOrderStatusUpdateEmail] Minimal marker present:', sanitizedHtml.includes('STATUS_TEMPLATE_MINIMAL'))

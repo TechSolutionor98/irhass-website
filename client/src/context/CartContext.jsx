@@ -627,13 +627,53 @@ export const CartProvider = ({ children }) => {
         })
 
         if (existingItemIndex > -1) {
-          // Update existing item
+          // Update existing item with stock boundary check
           const updatedItems = [...prevItems]
-          updatedItems[existingItemIndex].quantity += quantity
+          const existingItem = updatedItems[existingItemIndex]
+          const sizeStock = existingItem.selectedSizeData?.countInStock !== undefined
+            ? Number(existingItem.selectedSizeData.countInStock)
+            : null
+          const maxAllowed = sizeStock !== null
+            ? Math.min(existingItem.maxPurchaseQty || 9999, sizeStock)
+            : (existingItem.maxPurchaseQty || 10)
+
+          const newQty = existingItem.quantity + quantity
+          if (newQty > maxAllowed) {
+            const sizeLabel = existingItem.selectedSizeData?.code || existingItem.selectedSizeData?.name
+            if (sizeStock !== null && newQty > sizeStock) {
+              showToast(sizeLabel ? `Only ${sizeStock} units are available in size ${sizeLabel}.` : `Only ${sizeStock} units are available.`, "error")
+            } else if (existingItem.maxPurchaseQty && newQty > existingItem.maxPurchaseQty) {
+              showToast(`Maximum purchase limit of ${existingItem.maxPurchaseQty} reached for this item.`, "error")
+            }
+            return prevItems
+          }
+
+          updatedItems[existingItemIndex].quantity = newQty
           return updatedItems
         } else {
+          // Check stock before adding new item
+          const sizeStock = product.selectedSizeData?.countInStock !== undefined
+            ? Number(product.selectedSizeData.countInStock)
+            : null
+          const maxAllowed = sizeStock !== null
+            ? Math.min(product.maxPurchaseQty || 9999, sizeStock)
+            : (product.maxPurchaseQty || 10)
+
+          if (sizeStock !== null && sizeStock <= 0) {
+            const sizeLabel = product.selectedSizeData?.code || product.selectedSizeData?.name
+            showToast(sizeLabel ? `Size ${sizeLabel} is currently out of stock.` : "This item is currently out of stock.", "error")
+            return prevItems
+          }
+
+          if (quantity > maxAllowed) {
+            const sizeLabel = product.selectedSizeData?.code || product.selectedSizeData?.name
+            if (sizeStock !== null && quantity > sizeStock) {
+              showToast(sizeLabel ? `Only ${sizeStock} units are available in size ${sizeLabel}.` : `Only ${sizeStock} units are available.`, "error")
+            }
+            return prevItems
+          }
+
           // Store the final unit price on the cart line:
-          // bundlePrice if bundle item; else use the price passed from ProductDetails (already calculated)
           const finalUnitPrice =
             product.isBundleItem && product.bundlePrice
               ? product.bundlePrice
@@ -642,7 +682,7 @@ export const CartProvider = ({ children }) => {
           const cartItem = {
             ...product,
             quantity,
-            cartId: `${product._id}_${bundleId || "regular"}_${product.selectedColorIndex ?? "nocolor"}_${product.selectedDosIndex ?? "nodos"}_${product.selectedSizeData?.code || "nosize"}_${Date.now()}`,
+            cartId: product.cartId || `${product._id}_${bundleId || "regular"}_${product.selectedColorIndex ?? "nocolor"}_${product.selectedDosIndex ?? "nodos"}_${product.selectedSizeData?.code || "nosize"}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
             bundleId: bundleId || null,
             isBundleItem: product.isBundleItem || false,
             bundleDiscount: product.bundleDiscount || false,
@@ -782,40 +822,44 @@ export const CartProvider = ({ children }) => {
   }, [])
 
   const removeFromCart = useCallback(
-    (productId, bundleId = null) => {
-      const product = cartItems.find((item) => item._id === productId && item.bundleId === bundleId)
+    (identifier, bundleId = null) => {
+      setCartItems((prevItems) => {
+        const itemIndex = prevItems.findIndex(
+          (item) => (item.cartId && item.cartId === identifier) || (item._id === identifier && item.bundleId === bundleId)
+        )
+        if (itemIndex === -1) return prevItems
+        const product = prevItems[itemIndex]
 
-      if (product) {
-        // Push remove from cart event to data layer
-        try {
-          window.dataLayer = window.dataLayer || []
-          window.dataLayer.push({
-            event: "remove_from_cart",
-            ecommerce: {
-              currency: "PKR",
-              value: product.price * product.quantity,
-              items: [
-                {
-                  item_id: product._id,
-                  item_name: product.name,
-                  item_category: product.parentCategory?.name || product.category?.name || "Uncategorized",
-                  item_brand: product.brand?.name || "Unknown",
-                  price: product.price,
-                  quantity: product.quantity,
-                },
-              ],
-            },
-          })
-          console.log("Remove from cart tracked:", product.name)
-        } catch (error) {
-          console.error("GTM tracking error:", error)
+        if (product) {
+          try {
+            window.dataLayer = window.dataLayer || []
+            window.dataLayer.push({
+              event: "remove_from_cart",
+              ecommerce: {
+                currency: "PKR",
+                value: product.price * product.quantity,
+                items: [
+                  {
+                    item_id: product._id,
+                    item_name: product.name,
+                    item_category: product.parentCategory?.name || product.category?.name || "Uncategorized",
+                    item_brand: product.brand?.name || "Unknown",
+                    price: product.price,
+                    quantity: product.quantity,
+                  },
+                ],
+              },
+            })
+            console.log("Remove from cart tracked:", product.name)
+          } catch (error) {
+            console.error("GTM tracking error:", error)
+          }
         }
-      }
 
-      setCartItems((prevItems) => prevItems.filter((item) => !(item._id === productId && item.bundleId === bundleId)))
-
+        return prevItems.filter((_, idx) => idx !== itemIndex)
+      })
     },
-    [cartItems],
+    [],
   )
 
   // Function to remove entire bundle
@@ -834,17 +878,42 @@ export const CartProvider = ({ children }) => {
   )
 
   const updateQuantity = useCallback(
-    (productId, quantity, bundleId = null) => {
-      if (quantity <= 0) {
-        removeFromCart(productId, bundleId)
-        return
-      }
+    (identifier, quantity, bundleId = null) => {
+      setCartItems((prevItems) => {
+        const itemIndex = prevItems.findIndex(
+          (item) => (item.cartId && item.cartId === identifier) || (item._id === identifier && item.bundleId === bundleId)
+        )
+        if (itemIndex === -1) return prevItems
 
-      setCartItems((prevItems) =>
-        prevItems.map((item) => (item._id === productId && item.bundleId === bundleId ? { ...item, quantity } : item)),
-      )
+        const currentItem = prevItems[itemIndex]
+
+        if (quantity <= 0) {
+          return prevItems.filter((_, idx) => idx !== itemIndex)
+        }
+
+        const sizeStock = currentItem.selectedSizeData?.countInStock !== undefined
+          ? Number(currentItem.selectedSizeData.countInStock)
+          : null
+        const maxLimit = sizeStock !== null
+          ? Math.min(currentItem.maxPurchaseQty || 9999, sizeStock)
+          : (currentItem.maxPurchaseQty || 10)
+
+        if (quantity > maxLimit) {
+          const sizeLabel = currentItem.selectedSizeData?.code || currentItem.selectedSizeData?.name
+          if (sizeStock !== null && quantity > sizeStock) {
+            showToast(sizeLabel ? `Only ${sizeStock} units are available in size ${sizeLabel}.` : `Only ${sizeStock} units are available.`, "error")
+          } else if (currentItem.maxPurchaseQty && quantity > currentItem.maxPurchaseQty) {
+            showToast(`Maximum purchase limit of ${currentItem.maxPurchaseQty} reached for this item.`, "error")
+          }
+          return prevItems
+        }
+
+        const updated = [...prevItems]
+        updated[itemIndex] = { ...currentItem, quantity }
+        return updated
+      })
     },
-    [removeFromCart],
+    [showToast],
   )
 
   const clearCart = useCallback(() => {
@@ -868,6 +937,7 @@ export const CartProvider = ({ children }) => {
     <CartContext.Provider
       value={{
         cartItems,
+        setCartItems,
         cartCount,
         cartTotal, // This is the authoritative cart total
         bundleGroups,

@@ -1,9 +1,11 @@
 "use client"
 
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import { useCart } from "../context/CartContext"
+import { useAuth } from "../context/AuthContext"
 import { useLanguage } from "../context/LanguageContext"
 import { useCurrency } from "../context/CurrencyContext"
+import { rememberReturnPath } from "../utils/authRedirect"
 import {
   Trash2,
   Minus,
@@ -155,6 +157,8 @@ const Cart = () => {
     loyaltyDiscount,
     applyLoyaltyRedemption,
   } = useCart()
+  const navigate = useNavigate()
+  const { user } = useAuth()
   const { getLocalizedPath, isArabic } = useLanguage()
   const { formatPrice: formatCurrencyPrice, currentCountry } = useCurrency()
   const {
@@ -164,6 +168,19 @@ const Cart = () => {
     applyReward: applyReferralReward,
     clearReward: clearReferralReward,
   } = useReferral()
+
+  const handleProceedToCheckout = (e) => {
+    if (e && typeof e.preventDefault === "function") e.preventDefault()
+    const checkoutPath = getLocalizedPath("/checkout")
+    if (!user) {
+      rememberReturnPath(checkoutPath)
+      navigate(getLocalizedPath("/login"), {
+        state: { from: { pathname: checkoutPath } },
+      })
+      return
+    }
+    navigate(checkoutPath)
+  }
 
   const [couponInput, setCouponInput] = useState("")
   const [couponLoading, setCouponLoading] = useState(false)
@@ -472,12 +489,20 @@ const Cart = () => {
   // strip; quantity and the line total on the last row. The same markup serves phones
   // and desktops.
   const renderItem = (item, isInBundle = false, bundleId = null) => {
+    const sizeStock = item.selectedSizeData && item.selectedSizeData.countInStock !== undefined && item.selectedSizeData.countInStock !== null
+      ? Number(item.selectedSizeData.countInStock)
+      : (item.countInStock !== undefined && item.countInStock !== null ? Number(item.countInStock) : null)
+    const sizeLabel = item.selectedSizeData?.code || item.selectedSizeData?.name
+    const isOutOfStock = sizeStock !== null && sizeStock <= 0
+    const maxStockLimit = sizeStock !== null ? sizeStock : (item.maxPurchaseQty || 9999)
+    const effectiveMaxQty = item.maxPurchaseQty ? Math.min(item.maxPurchaseQty, maxStockLimit) : maxStockLimit
+    const atMax = item.quantity >= effectiveMaxQty || isOutOfStock
+    const lineIdentifier = item.cartId || item._id
     const pricingDetails = getItemPricingDetails(item)
     const itemTotal = getItemTotal(item)
-    const atMax = item.maxPurchaseQty && item.quantity >= item.maxPurchaseQty
 
     return (
-      <li key={`${item._id}-${bundleId || "standalone"}`} className="px-4 py-4 sm:px-5 sm:py-5">
+      <li key={item.cartId || `${item._id}-${bundleId || "standalone"}-${sizeLabel || "def"}`} className="px-4 py-4 sm:px-5 sm:py-5">
         <div className="flex gap-4">
           <Link
             to={productHref(item)}
@@ -504,10 +529,15 @@ const Cart = () => {
                 {(item.selectedColorData || item.selectedDosData || item.selectedSizeData || isInBundle) && (
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {item.selectedSizeData && (
-                      <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-800 font-medium">
+                      <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-800 font-medium">
                         <TranslatedText>Size</TranslatedText>: {item.selectedSizeData.code || item.selectedSizeData.name}
                         {Number(item.selectedSizeData.additionalPrice) > 0 && (
                           <span className="text-amber-600 font-normal">(+{formatPrice(item.selectedSizeData.additionalPrice)})</span>
+                        )}
+                        {sizeStock !== null && (
+                          <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded ${sizeStock > 0 ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-700"}`}>
+                            {sizeStock > 0 ? `${sizeStock} available` : "Out of Stock"}
+                          </span>
                         )}
                       </span>
                     )}
@@ -539,7 +569,7 @@ const Cart = () => {
 
               <button
                 type="button"
-                onClick={() => (isInBundle ? removeItemFromBundle(item._id, bundleId) : removeFromCart(item._id))}
+                onClick={() => (isInBundle ? removeItemFromBundle(lineIdentifier, bundleId) : removeFromCart(lineIdentifier))}
                 className="flex-shrink-0 p-1.5 -mr-1.5 -mt-1 rounded-full text-gray-400 hover:bg-red-50 hover:text-red-600 transition"
                 title={isInBundle ? "Remove entire bundle" : "Remove from cart"}
                 aria-label={isInBundle ? "Remove entire bundle" : "Remove from cart"}
@@ -594,12 +624,18 @@ const Cart = () => {
               <div>
                 <CartQuantityInput
                   value={item.quantity}
-                  onChange={(newQty) => handleQuantityChange(item._id, newQty, bundleId)}
-                  max={item.maxPurchaseQty}
+                  onChange={(newQty) => handleQuantityChange(lineIdentifier, newQty, bundleId)}
+                  max={effectiveMaxQty}
                 />
                 {atMax && (
                   <p className="mt-1 text-[11px] text-gray-500">
-                    <TranslatedText>Max</TranslatedText> {item.maxPurchaseQty}
+                    {isOutOfStock ? (
+                      <span className="text-red-600 font-semibold">Out of Stock</span>
+                    ) : sizeStock !== null && item.quantity >= sizeStock ? (
+                      <span className="text-amber-700 font-medium">Only {sizeStock} available in size {sizeLabel}</span>
+                    ) : (
+                      <span><TranslatedText>Max</TranslatedText> {effectiveMaxQty}</span>
+                    )}
                   </p>
                 )}
               </div>
@@ -917,13 +953,14 @@ const Cart = () => {
                     </span>
                   </label>
 
-                  <Link
-                    to={getLocalizedPath("/checkout")}
+                  <button
+                    type="button"
+                    onClick={handleProceedToCheckout}
                     className="mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl bg-lime-600 px-4 py-3.5 text-base font-semibold text-white hover:bg-lime-700 transition"
                   >
                     <Lock size={16} />
                     <TranslatedText>Checkout</TranslatedText>
-                  </Link>
+                  </button>
 
                   <div className="mt-3 flex items-center justify-center gap-2">
                     <span className="text-[11px] uppercase tracking-wide text-gray-400">
@@ -1055,13 +1092,14 @@ const Cart = () => {
               </p>
               <p className="text-lg font-bold text-gray-900 leading-tight">{formatPrice(totalWithDeliveryTaxCoupon)}</p>
             </div>
-            <Link
-              to={getLocalizedPath("/checkout")}
+            <button
+              type="button"
+              onClick={handleProceedToCheckout}
               className="inline-flex items-center gap-2 rounded-xl bg-lime-600 px-5 py-3 text-sm font-semibold text-white hover:bg-lime-700"
             >
               <TranslatedText>Checkout</TranslatedText>
               <ArrowRight size={16} />
-            </Link>
+            </button>
           </div>
         </div>
       )}

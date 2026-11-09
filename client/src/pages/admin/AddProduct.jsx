@@ -613,6 +613,7 @@ const AddProduct = () => {
                 name: sizeObj.name,
                 code: sizeObj.code,
                 additionalPrice: 0,
+                countInStock: 0,
               },
             ],
       }
@@ -624,6 +625,14 @@ const AddProduct = () => {
     setFormData((prev) => ({
       ...prev,
       selectedSizes: prev.selectedSizes.map((item, i) => (i === index ? { ...item, additionalPrice: numVal } : item)),
+    }))
+  }
+
+  const handleSizeStockChange = (index, value) => {
+    const numVal = value === "" ? "" : Math.max(0, Number.parseInt(value) || 0)
+    setFormData((prev) => ({
+      ...prev,
+      selectedSizes: prev.selectedSizes.map((item, i) => (i === index ? { ...item, countInStock: numVal } : item)),
     }))
   }
 
@@ -698,6 +707,7 @@ const AddProduct = () => {
           name: s.name || "",
           code: s.code || "",
           additionalPrice: Number(s.additionalPrice) || 0,
+          countInStock: Number(s.countInStock) >= 0 ? Number(s.countInStock) : 0,
         })),
         weight: Number.parseFloat(formData.weight) || 0,
         tags: formData.tags ? formData.tags.split(",").map((tag) => tag.trim()) : [],
@@ -1349,6 +1359,10 @@ const AddProduct = () => {
 
                   {(formData.selectedSizes || []).length > 0 && (
                     <div className="mt-4 border rounded-lg overflow-hidden">
+                      <div className="px-4 py-2 bg-amber-50 border-b flex justify-between items-center text-xs text-amber-900">
+                        <span className="font-semibold uppercase tracking-wider">Configured Sizes &amp; Stock</span>
+                        <span>Total Size Stock: <strong className="text-stone-900">{(formData.selectedSizes || []).reduce((sum, s) => sum + (Number(s.countInStock) || 0), 0)}</strong></span>
+                      </div>
                       <table className="min-w-full divide-y divide-gray-200 text-sm">
                         <thead className="bg-gray-50 text-xs font-semibold text-gray-500 uppercase">
                           <tr>
@@ -1356,6 +1370,7 @@ const AddProduct = () => {
                             <th className="px-4 py-2 text-left">Base Price</th>
                             <th className="px-4 py-2 text-left">Additional Price (+PKR)</th>
                             <th className="px-4 py-2 text-left">Final Price</th>
+                            <th className="px-4 py-2 text-left">Stock Quantity</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200">
@@ -1385,6 +1400,19 @@ const AddProduct = () => {
                                 </td>
                                 <td className="px-4 py-2 font-bold text-green-700">
                                   Rs {(baseP + addP).toLocaleString()}
+                                </td>
+                                <td className="px-4 py-2">
+                                  <div className="flex items-center space-x-1 max-w-[120px]">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="1"
+                                      value={s.countInStock !== undefined ? s.countInStock : 0}
+                                      onChange={(e) => handleSizeStockChange(index, e.target.value)}
+                                      placeholder="0"
+                                      className="w-full px-2 py-1 text-sm border rounded focus:ring-1 focus:ring-amber-500 font-semibold"
+                                    />
+                                  </div>
                                 </td>
                               </tr>
                             )

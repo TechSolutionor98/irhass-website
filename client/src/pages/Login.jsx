@@ -25,7 +25,11 @@ const Login = () => {
 
   // Carried through to the sign-up link so a shopper interrupted at checkout is
   // returned there rather than to the home page.
-  const isFromCheckout = location.state?.from?.pathname === "/checkout"
+  const isFromCheckout =
+    Boolean(
+      location.state?.from?.pathname?.includes("checkout") ||
+      (typeof location.state?.from === "string" && location.state?.from?.includes("checkout"))
+    )
 
   const [formData, setFormData] = useState({ email: "", password: "" })
   const [showPassword, setShowPassword] = useState(false)
@@ -172,7 +176,7 @@ const Login = () => {
 
           <Link
             to={getLocalizedPath("/register")}
-            state={isFromCheckout ? { from: { pathname: "/checkout" } } : undefined}
+            state={isFromCheckout ? { from: location.state?.from || { pathname: getLocalizedPath("/checkout") } } : undefined}
             className="block w-full border border-stone-900 px-6 py-4 text-center text-sm font-semibold uppercase tracking-[0.16em] text-stone-900 transition-colors hover:bg-stone-900 hover:text-white"
           >
             <TranslatedText>Create an account</TranslatedText>

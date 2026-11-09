@@ -101,43 +101,79 @@ router.post(
 router.post(
   "/verify-email",
   asyncHandler(async (req, res) => {
-    const { email, code } = req.body
+    const rawEmail = req.body?.email || ""
+    const rawCode = req.body?.code || ""
+    const email = String(rawEmail).trim().toLowerCase()
+    const code = String(rawCode).trim()
+
+    if (!email) {
+      res.status(400)
+      throw new Error("Email address is required.")
+    }
+
+    if (!code || code.length !== 6) {
+      res.status(400)
+      throw new Error("Please enter all 6 digits of your verification code.")
+    }
 
     const user = await User.findOne({ email })
 
     if (!user) {
       res.status(404)
-      throw new Error("User not found")
+      throw new Error("No account found with this email address. Please register first.")
     }
 
+    // If already verified, log the user in immediately
     if (user.isEmailVerified) {
-      res.status(400)
-      throw new Error("Email is already verified")
-    }
-
-    if (user.verifyEmailCode(code)) {
-      user.isEmailVerified = true
-      user.emailVerificationCode = undefined
-      user.emailVerificationExpires = undefined
-      await user.save()
-
-      res.json({
+      return res.json({
         _id: user._id,
         name: user.name,
         email: user.email,
         isAdmin: user.isAdmin,
-        isEmailVerified: user.isEmailVerified,
-        // Drives the "choose your own password" prompt for an account an admin
-        // opened on the customer's behalf.
+        isEmailVerified: true,
         mustChangePassword: Boolean(user.mustChangePassword),
         registrationSource: user.registrationSource,
         registrationPlatform: user.registrationPlatform,
         token: generateToken(user._id),
+        message: "Email is already verified. Logging you in...",
       })
-    } else {
-      res.status(400)
-      throw new Error("Invalid or expired verification code")
     }
+
+    if (!user.emailVerificationCode || !user.emailVerificationExpires) {
+      res.status(400)
+      throw new Error("No pending verification code found. Please click Resend Code to request a new one.")
+    }
+
+    // Check expiration
+    if (new Date() > new Date(user.emailVerificationExpires)) {
+      res.status(410)
+      throw new Error("Your verification code has expired. Please click Resend Code to receive a new one.")
+    }
+
+    // Check code match
+    if (user.emailVerificationCode !== code) {
+      res.status(400)
+      throw new Error("Incorrect verification code. Please check your email and try again.")
+    }
+
+    // Verification successful
+    user.isEmailVerified = true
+    user.emailVerificationCode = undefined
+    user.emailVerificationExpires = undefined
+    await user.save()
+
+    res.json({
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      isAdmin: user.isAdmin,
+      isEmailVerified: true,
+      mustChangePassword: Boolean(user.mustChangePassword),
+      registrationSource: user.registrationSource,
+      registrationPlatform: user.registrationPlatform,
+      token: generateToken(user._id),
+      message: "Email verified successfully!",
+    })
   }),
 )
 
@@ -147,18 +183,26 @@ router.post(
 router.post(
   "/resend-verification",
   asyncHandler(async (req, res) => {
-    const { email } = req.body
+    const rawEmail = req.body?.email || ""
+    const email = String(rawEmail).trim().toLowerCase()
+
+    if (!email) {
+      res.status(400)
+      throw new Error("Email address is required.")
+    }
 
     const user = await User.findOne({ email })
 
     if (!user) {
       res.status(404)
-      throw new Error("User not found")
+      throw new Error("No account found with this email address. Please register first.")
     }
 
     if (user.isEmailVerified) {
-      res.status(400)
-      throw new Error("Email is already verified")
+      return res.status(200).json({
+        message: "Your email is already verified. You can sign in directly.",
+        alreadyVerified: true,
+      })
     }
 
     // Generate new verification code
@@ -169,12 +213,12 @@ router.post(
     try {
       await sendVerificationEmail(email, user.name, verificationCode)
       res.json({
-        message: "Verification code sent successfully!",
+        message: "A new 6-digit verification code has been sent to your email.",
       })
     } catch (emailError) {
-      console.error("Failed to send verification email:", emailError)
-      res.status(500)
-      throw new Error("Failed to send verification email")
+      console.error("[resend-verification] Failed to send email:", emailError)
+      res.status(502)
+      throw new Error("Unable to deliver verification email. Please check your email address or try again in a few moments.")
     }
   }),
 )

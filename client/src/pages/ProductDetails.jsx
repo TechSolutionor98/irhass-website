@@ -11,6 +11,7 @@ import LoyaltyEarnBadge from "../components/LoyaltyEarnBadge"
 import { getFullImageUrl } from "../utils/imageUtils"
 import { swatchBackground } from "../utils/colorSwatch"
 import { isSellable } from "../utils/stockGuard"
+import { rememberReturnPath } from "../utils/authRedirect"
 import PhoneInput from 'react-phone-number-input'
 import 'react-phone-number-input/style.css'
 import '../styles/phoneInput.css'
@@ -167,6 +168,18 @@ const ProductDetails = () => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [quantity, setQuantity] = useState(1)
+
+  const handleCheckoutClick = () => {
+    const checkoutPath = getLocalizedPath("/checkout")
+    if (!user) {
+      rememberReturnPath(checkoutPath)
+      navigate(getLocalizedPath("/login"), {
+        state: { from: { pathname: checkoutPath } },
+      })
+      return
+    }
+    navigate(checkoutPath)
+  }
   // Set when a line goes into the bag from this page. The drawer is told to stay shut
   // (see the silent flag in CartContext) and this shows the confirmation instead, so
   // the shopper is not thrown out of the product they are still reading about.
@@ -335,10 +348,61 @@ const ProductDetails = () => {
 
   // Get current Size variation
   const getCurrentSize = () => {
-    if (selectedSizeIndex !== null && product?.sizes && product.sizes.length > 0) {
+    if (selectedSizeIndex !== null && product?.sizes && product.sizes[selectedSizeIndex]) {
       return product.sizes[selectedSizeIndex] || null
     }
     return null
+  }
+
+  // Determine effective stock status considering sizes and other variations
+  const getEffectiveStockStatus = () => {
+    const currentSize = getCurrentSize()
+    if (currentSize && currentSize.countInStock !== undefined) {
+      return Number(currentSize.countInStock) > 0 ? "In Stock" : "Out of Stock"
+    }
+    if (product?.sizes && product.sizes.length > 0) {
+      const anyInStock = product.sizes.some((s) => s.countInStock === undefined || Number(s.countInStock) > 0)
+      return anyInStock ? "In Stock" : "Out of Stock"
+    }
+    return product?.stockStatus || "In Stock"
+  }
+
+  const isEffectiveOutOfStock = () => {
+    const currentColor = getCurrentColor()
+    const currentDos = getCurrentDos()
+    const currentSize = getCurrentSize()
+
+    if (currentDos && currentDos.countInStock <= 0) return true
+    if (currentColor && currentColor.countInStock <= 0) return true
+    if (currentSize && currentSize.countInStock !== undefined && Number(currentSize.countInStock) <= 0) return true
+    if (product?.sizes && product.sizes.length > 0 && selectedSizeIndex === null) {
+      const anyInStock = product.sizes.some((s) => s.countInStock === undefined || Number(s.countInStock) > 0)
+      if (!anyInStock) return true
+    }
+    if (!currentColor && !currentDos && !currentSize && product?.stockStatus === "Out of Stock") return true
+    return false
+  }
+
+  const getMaxQuantity = () => {
+    const currentSize = getCurrentSize()
+    const maxPurchase = product?.maxPurchaseQty || 10
+    if (currentSize && currentSize.countInStock !== undefined) {
+      const stock = Number(currentSize.countInStock) || 0
+      return Math.max(0, Math.min(maxPurchase, stock))
+    }
+    return maxPurchase
+  }
+
+  const handleSelectSize = (index) => {
+    setSelectedSizeIndex(index)
+    const sizeObj = product?.sizes?.[index]
+    if (sizeObj && sizeObj.countInStock !== undefined) {
+      const sStock = Number(sizeObj.countInStock) || 0
+      if (sStock > 0 && quantity > sStock) {
+        setQuantity(sStock)
+        showToast(`Quantity adjusted to ${sStock} (available stock for size ${sizeObj.code || sizeObj.name}).`, "info")
+      }
+    }
   }
 
   // Helper function to check if a URL is a YouTube URL
@@ -617,6 +681,12 @@ const ProductDetails = () => {
       }
 
       setProduct(data)
+      if (data?.sizes && data.sizes.length > 0) {
+        const firstInStockIdx = data.sizes.findIndex((s) => s.countInStock === undefined || Number(s.countInStock) > 0)
+        setSelectedSizeIndex(firstInStockIdx !== -1 ? firstInStockIdx : 0)
+      } else {
+        setSelectedSizeIndex(null)
+      }
       setError(null)
 
       // Add GTM tracking here - after product is successfully loaded
@@ -943,6 +1013,7 @@ const ProductDetails = () => {
     // Check stock status based on selected color, DOS variation, or main product
     const currentColor = getCurrentColor()
     const currentDos = getCurrentDos()
+    const currentSize = getCurrentSize()
     
     if (currentDos && currentDos.countInStock <= 0) {
       showToast("Selected OS option is out of stock", "error")
@@ -952,7 +1023,15 @@ const ProductDetails = () => {
       showToast("Selected color is out of stock", "error")
       return false
     }
-    if (!currentColor && !currentDos && product.stockStatus === "Out of Stock") {
+    if (currentSize && currentSize.countInStock !== undefined && Number(currentSize.countInStock) <= 0) {
+      showToast(`Selected size (${currentSize.code || currentSize.name}) is out of stock`, "error")
+      return false
+    }
+    if (currentSize && currentSize.countInStock !== undefined && quantity > Number(currentSize.countInStock)) {
+      showToast(`Only ${currentSize.countInStock} items available in size ${currentSize.code || currentSize.name}`, "error")
+      return false
+    }
+    if (!currentColor && !currentDos && !currentSize && product.stockStatus === "Out of Stock") {
       showToast("Product is out of stock", "error")
       return false
     }
@@ -984,7 +1063,6 @@ const ProductDetails = () => {
     }
 
     // Add Size additional price if selected (additive)
-    const currentSize = getCurrentSize()
     if (currentSize && Number(currentSize.additionalPrice) > 0) {
       finalPrice += Number(currentSize.additionalPrice) || 0
     }
@@ -1014,6 +1092,7 @@ const ProductDetails = () => {
         name: currentSize.name,
         code: currentSize.code,
         additionalPrice: Number(currentSize.additionalPrice) || 0,
+        countInStock: currentSize.countInStock !== undefined ? Number(currentSize.countInStock) : undefined,
       } : null,
       // Final calculated price (color/product base + DOS + Size if selected)
       // Clear offerPrice so CartContext uses 'price' as the effective price
@@ -1059,8 +1138,10 @@ const ProductDetails = () => {
     setQuantity((prev) => {
       const current = (prev === "" || isNaN(prev)) ? 1 : prev
       const newQuantity = current + delta
+      const maxQty = getMaxQuantity()
+      if (maxQty === 0) return 1
       if (newQuantity < 1) return 1
-      if (newQuantity > (product.maxPurchaseQty || 10)) return product.maxPurchaseQty || 10
+      if (newQuantity > maxQty) return maxQty
       return newQuantity
     })
   }
@@ -1074,10 +1155,10 @@ const ProductDetails = () => {
     const num = parseInt(valStr, 10)
     if (isNaN(num)) return
 
-    const maxQty = product.maxPurchaseQty || 10
+    const maxQty = getMaxQuantity()
     if (num < 1) {
       setQuantity(1)
-    } else if (num > maxQty) {
+    } else if (maxQty > 0 && num > maxQty) {
       setQuantity(maxQty)
     } else {
       setQuantity(num)
@@ -2462,17 +2543,18 @@ const ProductDetails = () => {
       "inline-flex items-center justify-center px-3 py-[5px] text-[10px] font-semibold uppercase tracking-[0.12em] leading-none";
     
     // Use the stockStatusAr if available, otherwise fallback to TranslatedText dictionary
+    const effectiveStock = getEffectiveStockStatus()
     const StockLabel = (
       <TranslatedText 
-        text={product.stockStatus} 
+        text={effectiveStock} 
         sourceDoc={product} 
         fieldName="stockStatus"
       >
-        {product.stockStatus === "PreOrder" ? "Pre-order" : product.stockStatus}
+        {effectiveStock === "PreOrder" ? "Pre-order" : effectiveStock}
       </TranslatedText>
     );
 
-    switch (product.stockStatus) {
+    switch (effectiveStock) {
       case "In Stock":
         return (
           <span className={baseClass + " bg-emerald-700 text-white"}>{StockLabel}</span>
@@ -3029,25 +3111,33 @@ const ProductDetails = () => {
 
               {/* Stock Status */}
               <div className="mt-4">
-                <span
-                  className={`text-sm ${
-                    product.stockStatus === "In Stock"
-                      ? "text-emerald-700"
-                      : product.stockStatus === "Out of Stock"
-                        ? "text-red-600"
-                        : "text-amber-700"
-                  }`}
-                >
-                  {product.stockStatus === "In Stock" && (
-                    <TranslatedText sourceDoc={product} fieldName="stockStatus">Available in stock</TranslatedText>
-                  )}
-                  {product.stockStatus === "Out of Stock" && (
-                    <TranslatedText sourceDoc={product} fieldName="stockStatus">Currently out of stock</TranslatedText>
-                  )}
-                  {product.stockStatus === "PreOrder" && (
-                    <TranslatedText sourceDoc={product} fieldName="stockStatus">Available for pre-order</TranslatedText>
-                  )}
-                </span>
+                {(() => {
+                  const currentSize = getCurrentSize()
+                  const availableQuantity = currentSize && currentSize.countInStock !== undefined
+                    ? Number(currentSize.countInStock)
+                    : (product.countInStock !== undefined ? Number(product.countInStock) : 0)
+
+                  const isAvailable = availableQuantity > 0
+
+                  return (
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`inline-block w-2.5 h-2.5 rounded-full ${
+                          isAvailable
+                            ? "bg-emerald-600 animate-pulse"
+                            : "bg-red-500"
+                        }`}
+                      />
+                      <span
+                        className={`text-sm font-semibold ${
+                          isAvailable ? "text-emerald-700" : "text-red-600"
+                        }`}
+                      >
+                        <TranslatedText>Available in Stock</TranslatedText>: {availableQuantity}
+                      </span>
+                    </div>
+                  )
+                })()}
               </div>
 
               <div className="mt-6" />
@@ -3064,16 +3154,23 @@ const ProductDetails = () => {
                     {product.sizes.map((sizeItem, index) => {
                       const isSelected = selectedSizeIndex === index
                       const displayLabel = sizeItem.code || sizeItem.name
+                      const isOutOfStock = sizeItem.countInStock !== undefined && Number(sizeItem.countInStock) <= 0
                       return (
                         <button
                           key={sizeItem._id || index}
                           type="button"
-                          onClick={() => setSelectedSizeIndex(index)}
-                          className={`min-w-[46px] h-10 px-4 rounded border text-sm font-semibold transition-all duration-200 flex items-center justify-center ${
-                            isSelected
-                              ? "border-stone-900 bg-stone-900 text-white shadow-sm ring-2 ring-stone-900/20"
-                              : "border-stone-300 bg-white text-stone-800 hover:border-stone-500 hover:bg-stone-50"
+                          disabled={isOutOfStock}
+                          onClick={() => {
+                            if (!isOutOfStock) handleSelectSize(index)
+                          }}
+                          className={`min-w-[46px] h-10 px-4 rounded border text-sm font-semibold transition-all duration-200 flex items-center justify-center relative ${
+                            isOutOfStock
+                              ? "border-stone-200 bg-stone-100 text-stone-400 cursor-not-allowed opacity-60 line-through"
+                              : isSelected
+                                ? "border-stone-900 bg-stone-900 text-white shadow-sm ring-2 ring-stone-900/20 cursor-pointer"
+                                : "border-stone-300 bg-white text-stone-800 hover:border-stone-500 hover:bg-stone-50 cursor-pointer"
                           }`}
+                          title={isOutOfStock ? `${displayLabel} - Out of Stock` : `${displayLabel} (${sizeItem.countInStock || 0} available)`}
                         >
                           {displayLabel}
                         </button>
@@ -3505,12 +3602,20 @@ const ProductDetails = () => {
                         aria-label="Quantity"
                         className="w-12 border-l border-r border-stone-300 bg-transparent py-2 text-center text-sm focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                         min="1"
-                        max={product.maxPurchaseQty || 10}
+                        max={getMaxQuantity()}
                       />
                       <button
-                        onClick={() => handleQuantityChange(1)}
+                        onClick={() => {
+                          const maxQ = getMaxQuantity()
+                          if (quantity !== "" && quantity >= maxQ) {
+                            const cur = getCurrentSize()
+                            showToast(cur ? `Only ${maxQ} units are available in size ${cur.code || cur.name}.` : `Only ${maxQ} units are available.`, "error")
+                            return
+                          }
+                          handleQuantityChange(1)
+                        }}
                         className="px-3 py-2 text-stone-600 transition-colors hover:text-black disabled:opacity-40"
-                        disabled={quantity !== "" && quantity >= (product.maxPurchaseQty || 10)}
+                        disabled={quantity !== "" && quantity >= getMaxQuantity()}
                         aria-label="Increase quantity"
                       >
                         <Plus size={14} />
@@ -3538,7 +3643,7 @@ const ProductDetails = () => {
 
                 <button
                   onClick={handleAddToCart}
-                  disabled={product.stockStatus === "Out of Stock"}
+                  disabled={isEffectiveOutOfStock()}
                   className="hidden w-full items-center justify-center gap-2 bg-footer-bg px-6 py-4 text-sm font-semibold uppercase tracking-[0.14em] text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-stone-300 disabled:text-stone-500 lg:flex"
                 >
                   <ShoppingCart size={18} strokeWidth={1.6} />
@@ -3546,7 +3651,7 @@ const ProductDetails = () => {
                 </button>
 
                 <button
-                  disabled={product.stockStatus === "Out of Stock"}
+                  disabled={isEffectiveOutOfStock()}
                   className="hidden w-full border border-stone-900 px-6 py-4 text-sm font-semibold uppercase tracking-[0.14em] text-stone-900 transition-colors hover:bg-stone-900 hover:text-white disabled:cursor-not-allowed disabled:border-stone-300 disabled:text-stone-400 disabled:hover:bg-transparent disabled:hover:text-stone-400 lg:block"
                   onClick={handleBuyNow}
                 >
@@ -3573,7 +3678,7 @@ const ProductDetails = () => {
                         <TranslatedText>View bag</TranslatedText>
                       </button>
                       <button
-                        onClick={() => navigate(getLocalizedPath("/checkout"))}
+                        onClick={handleCheckoutClick}
                         className="bg-footer-bg px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white transition-colors hover:bg-brand-700"
                       >
                         <TranslatedText>Checkout</TranslatedText>
@@ -4560,7 +4665,7 @@ const ProductDetails = () => {
               <TranslatedText>View bag</TranslatedText>
             </button>
             <button
-              onClick={() => navigate(getLocalizedPath("/checkout"))}
+              onClick={handleCheckoutClick}
               className="flex-shrink-0 bg-footer-bg px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-white"
             >
               <TranslatedText>Checkout</TranslatedText>
@@ -4578,7 +4683,7 @@ const ProductDetails = () => {
             </div>
             <button
               onClick={handleAddToCart}
-              disabled={product.stockStatus === "Out of Stock"}
+              disabled={isEffectiveOutOfStock()}
               className="flex flex-1 items-center justify-center gap-1.5 border border-stone-900 px-3 py-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-stone-900 disabled:cursor-not-allowed disabled:border-stone-300 disabled:text-stone-400"
             >
               <ShoppingCart size={15} strokeWidth={1.8} />
@@ -4586,7 +4691,7 @@ const ProductDetails = () => {
             </button>
             <button
               onClick={handleBuyNow}
-              disabled={product.stockStatus === "Out of Stock"}
+              disabled={isEffectiveOutOfStock()}
               className="flex-1 bg-footer-bg px-3 py-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-white disabled:cursor-not-allowed disabled:bg-stone-300 disabled:text-stone-500"
             >
               <TranslatedText>Buy Now</TranslatedText>

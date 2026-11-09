@@ -4,9 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { X, Minus, Plus, ShoppingBag, ChevronLeft, ChevronRight } from "lucide-react"
 import { useCart } from "../context/CartContext"
+import { useAuth } from "../context/AuthContext"
 import { useCurrency } from "../context/CurrencyContext"
 import { useLanguage } from "../context/LanguageContext"
 import { getFullImageUrl } from "../utils/imageUtils"
+import { rememberReturnPath } from "../utils/authRedirect"
 import TranslatedText from "./TranslatedText"
 import config from "../config/config"
 
@@ -37,6 +39,7 @@ const CartDrawer = () => {
   } = useCart()
   const { formatPrice } = useCurrency()
   const { getLocalizedPath, currentLanguage } = useLanguage()
+  const { user } = useAuth()
   const navigate = useNavigate()
   const panelRef = useRef(null)
   const railRef = useRef(null)
@@ -95,7 +98,15 @@ const CartDrawer = () => {
 
   const goToCheckout = () => {
     closeCart()
-    navigate(getLocalizedPath("/checkout"))
+    const checkoutPath = getLocalizedPath("/checkout")
+    if (!user) {
+      rememberReturnPath(checkoutPath)
+      navigate(getLocalizedPath("/login"), {
+        state: { from: { pathname: checkoutPath } },
+      })
+      return
+    }
+    navigate(checkoutPath)
   }
 
   const nudge = useCallback((direction) => {
@@ -172,7 +183,13 @@ const CartDrawer = () => {
             <div className="flex-1 overflow-y-auto">
               <ul className="divide-y divide-stone-100">
                 {cartItems.map((item) => {
-                  const key = `${item._id}-${item.bundleId || "solo"}-${item.selectedColorIndex ?? "x"}`
+                  const sizeStock = item.selectedSizeData && item.selectedSizeData.countInStock !== undefined && item.selectedSizeData.countInStock !== null
+                    ? Number(item.selectedSizeData.countInStock)
+                    : (item.countInStock !== undefined && item.countInStock !== null ? Number(item.countInStock) : null)
+                  const maxLimit = sizeStock !== null ? Math.min(item.maxPurchaseQty || 9999, sizeStock) : (item.maxPurchaseQty || 10)
+                  const atMax = item.quantity >= maxLimit || (sizeStock !== null && sizeStock <= 0)
+                  const lineIdentifier = item.cartId || item._id
+                  const key = `${item.cartId || item._id}-${item.bundleId || "solo"}-${item.selectedColorIndex ?? "x"}-${item.selectedSizeData?.code || "def"}`
                   const line = unitPrice(item)
                   const href = getLocalizedPath(`/product/${encodeURIComponent(item.slug || item._id)}`)
 
@@ -201,7 +218,7 @@ const CartDrawer = () => {
                         {(item.selectedColorData || item.selectedDosData || item.selectedSizeData || item.bundleId) && (
                           <p className="mt-1 text-xs uppercase tracking-[0.1em] text-stone-500">
                             {[
-                              item.selectedSizeData ? `Size: ${item.selectedSizeData.code || item.selectedSizeData.name}` : null,
+                              item.selectedSizeData ? `Size: ${item.selectedSizeData.code || item.selectedSizeData.name}${sizeStock !== null ? (sizeStock <= 0 ? " (Out of Stock)" : ` (${sizeStock} available)`) : ""}` : null,
                               item.selectedColorData?.color,
                               item.selectedDosData?.dosType,
                               item.bundleId ? "Bundle" : null,
@@ -224,8 +241,9 @@ const CartDrawer = () => {
                               <button
                                 type="button"
                                 aria-label="Decrease quantity"
-                                onClick={() => updateQuantity(item._id, item.quantity - 1, item.bundleId)}
-                                className="px-3 py-2 text-stone-600 transition-colors hover:text-black"
+                                onClick={() => updateQuantity(lineIdentifier, item.quantity - 1, item.bundleId)}
+                                disabled={item.quantity <= 1}
+                                className="px-3 py-2 text-stone-600 transition-colors hover:text-black disabled:opacity-40 disabled:cursor-not-allowed"
                               >
                                 <Minus size={13} />
                               </button>
@@ -235,8 +253,9 @@ const CartDrawer = () => {
                               <button
                                 type="button"
                                 aria-label="Increase quantity"
-                                onClick={() => updateQuantity(item._id, item.quantity + 1, item.bundleId)}
-                                className="px-3 py-2 text-stone-600 transition-colors hover:text-black"
+                                onClick={() => updateQuantity(lineIdentifier, item.quantity + 1, item.bundleId)}
+                                disabled={atMax}
+                                className="px-3 py-2 text-stone-600 transition-colors hover:text-black disabled:opacity-40 disabled:cursor-not-allowed"
                               >
                                 <Plus size={13} />
                               </button>
@@ -246,7 +265,7 @@ const CartDrawer = () => {
                           <button
                             type="button"
                             onClick={() =>
-                              item.bundleId ? removeBundleFromCart(item.bundleId) : removeFromCart(item._id, null)
+                              item.bundleId ? removeBundleFromCart(item.bundleId) : removeFromCart(lineIdentifier, null)
                             }
                             className="text-sm text-stone-600 underline underline-offset-4 transition-colors hover:text-stone-900"
                           >

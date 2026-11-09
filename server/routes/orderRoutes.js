@@ -332,6 +332,7 @@ router.post(
     // Server-side Recalculation & Validation of Items
     let calculatedItemsPrice = 0
     const verifiedOrderItems = []
+    const requestedStockMap = new Map()
     // Loyalty needs the product document (for its earning rule) alongside the price
     // actually charged, so it is collected here rather than re-fetched later.
     const loyaltyEarnItems = []
@@ -421,19 +422,53 @@ router.post(
           dbPrice = product.offerPrice > 0 ? product.offerPrice : product.price
         }
 
+        // Check Size variation
+        let chosenSize = null
+        if (product.sizes && Array.isArray(product.sizes) && product.sizes.length > 0) {
+          if (item.selectedSizeData) {
+            chosenSize = product.sizes.find(
+              (s) =>
+                (item.selectedSizeData.sizeId && String(s.size || s._id) === String(item.selectedSizeData.sizeId)) ||
+                (item.selectedSizeData.code && s.code && s.code.toLowerCase() === String(item.selectedSizeData.code).toLowerCase()) ||
+                (item.selectedSizeData.name && s.name && s.name.toLowerCase() === String(item.selectedSizeData.name).toLowerCase()),
+            )
+          }
+          if (!chosenSize && item.selectedSizeIndex !== null && item.selectedSizeIndex !== undefined && product.sizes[item.selectedSizeIndex]) {
+            chosenSize = product.sizes[item.selectedSizeIndex]
+          }
+        }
+
+        if (chosenSize && Number(chosenSize.additionalPrice) > 0) {
+          dbPrice += Number(chosenSize.additionalPrice)
+        }
+
         // Nothing out of stock gets sold, however the request reached us.
-        //
-        // The product page disables the button, but that is a courtesy, not a control:
-        // a cart can sit in localStorage for a week, a bundle checkbox can be ticked
-        // before the last one sells, and the API is reachable without the page at all.
-        // See utils/stockGuard.js for why this is not a `countInStock > 0` test.
-        const stock = checkLineStock(product, chosenVariation, variationLabel)
+        const stock = checkLineStock(product, chosenVariation, variationLabel, chosenSize)
         if (!stock.ok) {
           res.status(400)
           throw new Error(stock.reason)
         }
 
         const quantity = Number(item.quantity) || 1
+
+        const stockKey = chosenSize
+          ? `${product._id}_size_${chosenSize.size || chosenSize._id || chosenSize.code}`
+          : (chosenVariation ? `${product._id}_var_${chosenVariation.sku || chosenVariation.color || chosenVariation.dosType}` : `${product._id}_general`)
+        const cumulativeQty = (requestedStockMap.get(stockKey) || 0) + quantity
+        requestedStockMap.set(stockKey, cumulativeQty)
+
+        if (chosenSize && chosenSize.countInStock !== undefined && cumulativeQty > Number(chosenSize.countInStock)) {
+          const sizeLabel = chosenSize.code || chosenSize.name || ""
+          res.status(400)
+          throw new Error(`Only ${chosenSize.countInStock} items available for ${product.name}${sizeLabel ? ` (Size: ${sizeLabel})` : ""}`)
+        }
+
+        if (!chosenSize && !chosenVariation && product.countInStock !== undefined && product.countInStock !== null && product.stockStatus !== "PreOrder") {
+          if (cumulativeQty > Number(product.countInStock)) {
+            res.status(400)
+            throw new Error(`Only ${product.countInStock} items available for ${product.name}`)
+          }
+        }
         
         const verifiedItem = {
           name: product.name,
@@ -468,6 +503,16 @@ router.post(
               offerPrice: dv.offerPrice,
               sku: dv.sku,
             }
+          }
+        }
+
+        if (chosenSize || item.selectedSizeData || (item.selectedSizeIndex !== null && item.selectedSizeIndex !== undefined)) {
+          verifiedItem.selectedSizeIndex = item.selectedSizeIndex !== undefined ? item.selectedSizeIndex : null
+          verifiedItem.selectedSizeData = {
+            sizeId: chosenSize?.size || chosenSize?._id || item.selectedSizeData?.sizeId || undefined,
+            name: chosenSize?.name || item.selectedSizeData?.name || "",
+            code: chosenSize?.code || item.selectedSizeData?.code || "",
+            additionalPrice: chosenSize?.additionalPrice !== undefined ? Number(chosenSize.additionalPrice) : (Number(item.selectedSizeData?.additionalPrice) || 0),
           }
         }
 

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Link, useNavigate, useSearchParams } from "react-router-dom"
+import { Link, useNavigate, useLocation, useSearchParams } from "react-router-dom"
 import axios from "axios"
 import { Eye, EyeOff, Gift } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
@@ -13,6 +13,7 @@ import { useReferral, getPendingReferralCode, setPendingReferralCode, clearPendi
 
 const Register = () => {
   const { getLocalizedPath } = useLanguage()
+  const location = useLocation()
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -197,7 +198,7 @@ const Register = () => {
 
       // Navigate to email verification page
       navigate(getLocalizedPath(`/verify-email?email=${encodeURIComponent(normalizedEmail)}`), {
-        state: { email: normalizedEmail },
+        state: { email: normalizedEmail, from: location.state?.from },
         replace: true,
       })
     } catch (error) {

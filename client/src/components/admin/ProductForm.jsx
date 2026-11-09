@@ -355,6 +355,7 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
             name: s.name || s.size?.name || "",
             code: s.code || s.size?.code || "",
             additionalPrice: s.additionalPrice !== undefined ? s.additionalPrice : 0,
+            countInStock: s.countInStock !== undefined ? s.countInStock : 0,
           }))
         )
       } else {
@@ -997,6 +998,7 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
           name: sizeObj.name,
           code: sizeObj.code,
           additionalPrice: 0,
+          countInStock: 0,
         },
       ])
     }
@@ -1006,6 +1008,13 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
     const numVal = value === "" ? "" : Math.max(0, Number.parseFloat(value) || 0)
     setSelectedProductSizes((prev) =>
       prev.map((item, i) => (i === index ? { ...item, additionalPrice: numVal } : item))
+    )
+  }
+
+  const handleSizeStockChange = (index, value) => {
+    const numVal = value === "" ? "" : Math.max(0, Number.parseInt(value) || 0)
+    setSelectedProductSizes((prev) =>
+      prev.map((item, i) => (i === index ? { ...item, countInStock: numVal } : item))
     )
   }
 
@@ -1105,6 +1114,7 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
           name: s.name || "",
           code: s.code || "",
           additionalPrice: Number(s.additionalPrice) || 0,
+          countInStock: Number(s.countInStock) >= 0 ? Number(s.countInStock) : 0,
         })),
         // SEO fields
         seoTitle: formData.seoTitle || "",
@@ -2566,10 +2576,10 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
             <div className="bg-white rounded-lg border border-amber-200 overflow-hidden shadow-sm">
               <div className="px-4 py-3 bg-amber-50/50 border-b border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <h4 className="text-xs font-bold text-amber-900 uppercase tracking-wider">
-                  Configured Sizes &amp; Additional Prices
+                  Configured Sizes &amp; Additional Prices &amp; Stock
                 </h4>
                 <div className="text-xs text-amber-800 bg-amber-100/70 px-2.5 py-1 rounded border border-amber-200">
-                  Pricing Formula: <span className="font-semibold">Final Price = Base Product Price + Selected Size's Additional Price</span>
+                  Total Size Stock: <span className="font-bold text-stone-900">{selectedProductSizes.reduce((sum, s) => sum + (Number(s.countInStock) || 0), 0)}</span> | Pricing Formula: <span className="font-semibold">Final Price = Base Product Price + Additional Price</span>
                 </div>
               </div>
               <div className="overflow-x-auto">
@@ -2581,6 +2591,7 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
                       <th className="px-4 py-3 text-left">Base Price</th>
                       <th className="px-4 py-3 text-left">Additional Price (+PKR)</th>
                       <th className="px-4 py-3 text-left">Final Calculated Price</th>
+                      <th className="px-4 py-3 text-left">Stock Quantity</th>
                       <th className="px-4 py-3 text-right">Action</th>
                     </tr>
                   </thead>
@@ -2629,6 +2640,19 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
                                 (+Rs {addPrice})
                               </span>
                             )}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <div className="flex items-center space-x-1 max-w-[120px]">
+                              <input
+                                type="number"
+                                min="0"
+                                step="1"
+                                value={s.countInStock !== undefined ? s.countInStock : 0}
+                                onChange={(e) => handleSizeStockChange(index, e.target.value)}
+                                placeholder="0"
+                                className="w-full px-2.5 py-1 text-sm font-semibold border border-gray-300 rounded focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                              />
+                            </div>
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap text-right">
                             <button

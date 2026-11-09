@@ -16,19 +16,70 @@ const DIRECTION = { in: 1, out: -1, damage: -1 }
  * Returns null rather than throwing on bad input: this is called from order
  * creation, and a ledger problem must never fail a sale the customer has paid for.
  */
-export const postMovement = async ({ product, type, quantity, reason = "", order = null, createdBy = null }) => {
+export const postMovement = async ({
+  product,
+  type,
+  quantity,
+  reason = "",
+  order = null,
+  createdBy = null,
+  selectedSizeData = null,
+  selectedSizeIndex = null,
+}) => {
   try {
     const qty = Math.abs(Number(quantity) || 0)
     if (!product || !DIRECTION[type] || qty === 0) return null
 
-    // $inc so two orders landing together cannot read the same figure and both write
-    // it back; the database does the arithmetic.
-    const updated = await Product.findByIdAndUpdate(
-      product,
-      { $inc: { countInStock: DIRECTION[type] * qty } },
-      { new: true, select: "countInStock" },
-    )
-    if (!updated) return null
+    const prodDoc = await Product.findById(product)
+    if (!prodDoc) return null
+
+    const delta = DIRECTION[type] * qty
+
+    // Check if this product has size variations and a size was selected
+    let sizeMatched = false
+    if (prodDoc.sizes && Array.isArray(prodDoc.sizes) && prodDoc.sizes.length > 0) {
+      let sizeIdx = -1
+      if (selectedSizeData) {
+        sizeIdx = prodDoc.sizes.findIndex(
+          (s) =>
+            (selectedSizeData.sizeId && String(s.size || s._id) === String(selectedSizeData.sizeId)) ||
+            (selectedSizeData.code && s.code && s.code.toLowerCase() === String(selectedSizeData.code).toLowerCase()) ||
+            (selectedSizeData.name && s.name && s.name.toLowerCase() === String(selectedSizeData.name).toLowerCase()),
+        )
+      }
+      if (sizeIdx === -1 && selectedSizeIndex !== null && selectedSizeIndex !== undefined && prodDoc.sizes[selectedSizeIndex]) {
+        sizeIdx = selectedSizeIndex
+      }
+
+      if (sizeIdx !== -1) {
+        sizeMatched = true
+        const currentSizeStock = Number(prodDoc.sizes[sizeIdx].countInStock) || 0
+        const newSizeStock = Math.max(0, currentSizeStock + delta)
+        prodDoc.sizes[sizeIdx].countInStock = newSizeStock
+
+        // Recalculate total product countInStock from all sizes
+        const totalSizeStock = prodDoc.sizes.reduce((sum, s) => sum + (Number(s.countInStock) || 0), 0)
+        prodDoc.countInStock = Math.max(0, totalSizeStock)
+
+        // Automatically update stockStatus based on available quantity of sizes
+        if (prodDoc.stockStatus !== "PreOrder") {
+          prodDoc.stockStatus = totalSizeStock > 0 ? "In Stock" : "Out of Stock"
+        }
+        await prodDoc.save()
+      }
+    }
+
+    if (!sizeMatched) {
+      prodDoc.countInStock = Math.max(0, (Number(prodDoc.countInStock) || 0) + delta)
+      if (prodDoc.stockStatus !== "PreOrder") {
+        if (prodDoc.countInStock === 0 && delta < 0) {
+          prodDoc.stockStatus = "Out of Stock"
+        } else if (prodDoc.countInStock > 0 && prodDoc.stockStatus === "Out of Stock") {
+          prodDoc.stockStatus = "In Stock"
+        }
+      }
+      await prodDoc.save()
+    }
 
     return await StockMovement.create({
       product,
@@ -37,7 +88,7 @@ export const postMovement = async ({ product, type, quantity, reason = "", order
       reason,
       order,
       createdBy,
-      balanceAfter: updated.countInStock,
+      balanceAfter: prodDoc.countInStock,
     })
   } catch (error) {
     console.error("[STOCK] Could not post movement:", error.message)
@@ -56,6 +107,8 @@ export const postOrderOut = async (order) => {
       quantity: item.quantity,
       reason: `Order ${String(order._id).slice(-6).toUpperCase()}`,
       order: order._id,
+      selectedSizeData: item.selectedSizeData || null,
+      selectedSizeIndex: item.selectedSizeIndex ?? null,
     })
   }
 }
@@ -84,6 +137,8 @@ export const postOrderReturn = async (order) => {
       quantity: item.quantity,
       reason: `Cancelled order ${String(order._id).slice(-6).toUpperCase()}`,
       order: order._id,
+      selectedSizeData: item.selectedSizeData || null,
+      selectedSizeIndex: item.selectedSizeIndex ?? null,
     })
   }
 }

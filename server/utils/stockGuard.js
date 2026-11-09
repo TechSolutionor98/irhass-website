@@ -27,12 +27,25 @@ const isSet = (value) => value !== null && value !== undefined && value !== ""
  * @param {object} product the product document
  * @param {object} [variation] the chosen colour or DOS variation, if any
  * @param {string} [variationLabel] e.g. "Champagne", for the message
+ * @param {object} [size] the chosen size variation, if any
  * @returns {{ ok: boolean, reason?: string }}
  */
-export const checkLineStock = (product, variation = null, variationLabel = "") => {
+export const checkLineStock = (product, variation = null, variationLabel = "", size = null) => {
   if (!product) return { ok: false, reason: "Product not found" }
 
   const name = product.name || "This item"
+
+  // If a specific size was chosen, its own stock count is authoritative.
+  if (size && isSet(size.countInStock)) {
+    if (!(Number(size.countInStock) > 0)) {
+      const sizeLabel = size.code || size.name || ""
+      return {
+        ok: false,
+        reason: sizeLabel ? `${name} (Size: ${sizeLabel}) is out of stock` : `${name} is out of stock`,
+      }
+    }
+    return { ok: true }
+  }
 
   // A chosen variation with its own figure is the most specific answer available.
   if (variation && isSet(variation.countInStock)) {
@@ -54,6 +67,7 @@ export const checkLineStock = (product, variation = null, variationLabel = "") =
 }
 
 /** True when the shopper-facing UI should let this line be chosen at all. */
-export const isSellable = (product, variation = null) => checkLineStock(product, variation).ok
+export const isSellable = (product, variation = null, size = null) => checkLineStock(product, variation, "", size).ok
 
 export default { checkLineStock, isSellable }
+

@@ -12,12 +12,14 @@ import { useCurrency } from "../context/CurrencyContext"
 import { useLoyalty } from "../context/LoyaltyContext"
 import LoyaltyRedeemModal from "../components/LoyaltyRedeemModal"
 import GrabCoin from "../components/GrabCoin"
+import { useToast } from "../context/ToastContext"
 import { useReferral } from "../context/ReferralContext"
 import ReferralRewardModal from "../components/ReferralRewardModal"
 import { getProvincesForCountry } from "../utils/countryStates"
 import { DEFAULT_VAT_RATE } from "../utils/vat"
 import AddressAutocomplete from "../components/AddressAutocomplete"
 import { resolveDeliveryCharge, selectDeliveryMethod, describeDeliveryBlock } from "../utils/deliveryCharge"
+import { rememberReturnPath } from "../utils/authRedirect"
 import { Truck, Shield, MapPin, ChevronDown, ChevronUp, Banknote, Clock, X, Plus, Minus, Trash2, Gift, Percent, Copy, Check, Ticket } from "lucide-react"
 import { Dialog } from "@headlessui/react"
 import { Fragment } from "react"
@@ -174,9 +176,10 @@ const ReviewSection = ({ id, title, action, children }) => (
 
 const Checkout = () => {
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, loading: authLoading } = useAuth()
   const {
     cartItems,
+    setCartItems,
     cartTotal,
     clearCart,
     calculateFinalTotal,
@@ -196,6 +199,99 @@ const Checkout = () => {
     clearLoyaltyRedemption,
     orderNote,
   } = useCart()
+  const { showToast } = useToast()
+
+  // Live stock sync on Checkout mount to ensure cart quantities adhere to current inventory
+  useEffect(() => {
+    if (!cartItems || cartItems.length === 0) return
+
+    let isMounted = true
+    const syncStock = async () => {
+      try {
+        const uniqueProductIds = [...new Set(cartItems.map((item) => item._id).filter(Boolean))]
+        if (uniqueProductIds.length === 0) return
+
+        const responses = await Promise.all(
+          uniqueProductIds.map(async (id) => {
+            try {
+              const res = await axios.get(`${config.API_URL}/api/products/${id}`)
+              return { id, product: res.data }
+            } catch {
+              return { id, product: null }
+            }
+          })
+        )
+
+        if (!isMounted) return
+
+        const productMap = new Map()
+        responses.forEach(({ id, product }) => {
+          if (product) productMap.set(String(id), product)
+        })
+
+        let hasAdjustments = false
+        const adjustments = []
+
+        const updatedItems = cartItems.map((item) => {
+          const freshProd = productMap.get(String(item._id))
+          if (!freshProd) return item
+
+          let updatedItem = { ...item }
+
+          if (item.selectedSizeData && freshProd.sizes && Array.isArray(freshProd.sizes)) {
+            const freshSize = freshProd.sizes.find(
+              (s) =>
+                (item.selectedSizeData.sizeId && String(s.size || s._id) === String(item.selectedSizeData.sizeId)) ||
+                (item.selectedSizeData.code && s.code && s.code.toLowerCase() === String(item.selectedSizeData.code).toLowerCase()) ||
+                (item.selectedSizeData.name && s.name && s.name.toLowerCase() === String(item.selectedSizeData.name).toLowerCase())
+            )
+
+            if (freshSize) {
+              const freshCount = Number(freshSize.countInStock) || 0
+              updatedItem.selectedSizeData = {
+                ...updatedItem.selectedSizeData,
+                countInStock: freshCount,
+              }
+
+              if (freshCount <= 0 && item.quantity > 0) {
+                hasAdjustments = true
+                adjustments.push(`${item.name} (${freshSize.code || freshSize.name}) is currently out of stock.`)
+              } else if (item.quantity > freshCount) {
+                hasAdjustments = true
+                adjustments.push(`Quantity for ${item.name} (${freshSize.code || freshSize.name}) was adjusted to ${freshCount} based on available stock.`)
+                updatedItem.quantity = freshCount
+              }
+            }
+          } else if (freshProd.countInStock !== undefined) {
+            const freshCount = Number(freshProd.countInStock) || 0
+            updatedItem.countInStock = freshCount
+            if (freshCount <= 0 && item.quantity > 0) {
+              hasAdjustments = true
+              adjustments.push(`${item.name} is currently out of stock.`)
+            } else if (item.quantity > freshCount) {
+              hasAdjustments = true
+              adjustments.push(`Quantity for ${item.name} was adjusted to ${freshCount} based on available stock.`)
+              updatedItem.quantity = freshCount
+            }
+          }
+
+          return updatedItem
+        })
+
+        if (hasAdjustments && typeof setCartItems === "function") {
+          setCartItems(updatedItems)
+          adjustments.forEach((msg) => showToast(msg, "error"))
+        }
+      } catch (err) {
+        console.error("Failed to sync live stock on checkout:", err)
+      }
+    }
+
+    syncStock()
+    return () => {
+      isMounted = false
+    }
+  }, [])
   const { getLocalizedPath, isArabic } = useLanguage()
   const { formatPrice: formatCurrencyPrice, countries, currentCountry } = useCurrency()
   const { isEnabled: loyaltyEnabled, refreshBalance: refreshLoyaltyBalance } = useLoyalty()
@@ -209,18 +305,29 @@ const Checkout = () => {
   } = useReferral()
   const location = useLocation()
 
+  // Enforce customer login before proceeding to checkout
+  useEffect(() => {
+    if (!authLoading && !user) {
+      rememberReturnPath(location.pathname, location.search)
+      navigate(getLocalizedPath("/login"), {
+        state: { from: { pathname: location.pathname, search: location.search } },
+        replace: true,
+      })
+    }
+  }, [authLoading, user, navigate, getLocalizedPath, location.pathname, location.search])
+
   const [tax, setTax] = useState(null)
   const [paymentChargesList, setPaymentChargesList] = useState({})
 
   const [formData, setFormData] = useState({
     name: user?.name || "",
     email: user?.email || "",
-    phone: "",
+    phone: user?.phone || "",
     address: "",
     city: "",
     state: "",
     zipCode: "",
-    country: "",
+    country: currentCountry?.name || "Pakistan",
   })
 
   // Fetch tax and payment charges on mount
@@ -648,25 +755,26 @@ const Checkout = () => {
   }
 
   const validateHomeDelivery = () => {
-    // Mirrors the server list exactly (server/routes/orderRoutes.js). The post code is
-    // absent from both: the field is labelled optional, and requiring it here produced
-    // "fill in all required fields" over a form where everything marked * was filled.
+    // Validates full customer delivery details before order placement
     const required = [
+      ["name", "full name"],
       ["email", "email address"],
       ["phone", "phone number"],
+      ["country", "country"],
       ["address", "street address"],
       ["city", "city"],
-      ["state", "province"],
+      ["state", "province / state"],
     ]
 
     const missing = required.filter(([key]) => !String(formData[key] || "").trim()).map(([, label]) => label)
 
     if (missing.length) {
-      setError(
+      const msg =
         missing.length === 1
           ? `Please add your ${missing[0]}.`
-          : `Please add your ${missing.join(", ")}.`,
-      )
+          : `Please add your ${missing.join(", ")}.`
+      setError(msg)
+      showToast(msg, "error")
       return false
     }
     return true
@@ -1259,6 +1367,49 @@ const Checkout = () => {
       return
     }
 
+    // Validate stock availability before proceeding with order placement
+    for (const item of cartItems) {
+      if (item.isProtection) continue
+
+      const sizeLabel = item.selectedSizeData?.code || item.selectedSizeData?.name
+      const sizeStock = item.selectedSizeData?.countInStock !== undefined && item.selectedSizeData?.countInStock !== null
+        ? Number(item.selectedSizeData.countInStock)
+        : null
+
+      if (sizeStock !== null) {
+        if (sizeStock <= 0) {
+          const msg = sizeLabel
+            ? `${item.name} (Size: ${sizeLabel}) is out of stock. Please remove it from your cart to proceed.`
+            : `${item.name} is out of stock. Please remove it from your cart to proceed.`
+          setError(msg)
+          showToast(msg, "error")
+          return
+        }
+        if (item.quantity > sizeStock) {
+          const msg = sizeLabel
+            ? `Only ${sizeStock} units are available in size ${sizeLabel}. Please adjust the quantity to proceed.`
+            : `Only ${sizeStock} units are available for ${item.name}. Please adjust the quantity to proceed.`
+          setError(msg)
+          showToast(msg, "error")
+          return
+        }
+      } else if (item.countInStock !== undefined && item.countInStock !== null && item.stockStatus !== "PreOrder") {
+        const productStock = Number(item.countInStock)
+        if (productStock <= 0) {
+          const msg = `${item.name} is out of stock. Please remove it from your cart to proceed.`
+          setError(msg)
+          showToast(msg, "error")
+          return
+        }
+        if (item.quantity > productStock) {
+          const msg = `Only ${productStock} units are available for ${item.name}. Please adjust the quantity to proceed.`
+          setError(msg)
+          showToast(msg, "error")
+          return
+        }
+      }
+    }
+
     try {
       setLoading(true)
       setError(null)
@@ -1466,92 +1617,112 @@ const Checkout = () => {
     }
   }
 
-  // The single "Place your order" action for the stacked layout. It runs the same checks
-  // the old step flow enforced at each transition -- the step gate is gone, so card / Tabby
-  // / Tamara (which go through createOrderThenPay and do NOT self-validate) must be gated
-  // here, or an order could be created with a missing address or no payment method.
+  // Place your order action
   const handlePlaceOrder = (e) => {
     if (e && typeof e.preventDefault === "function") e.preventDefault()
     if (cartItems.length === 0) {
       setError("Your cart is empty")
       return
     }
+
+    // Always validate delivery details before order placement
+    if (deliveryType === "home") {
+      if (!validateHomeDelivery()) return
+      if (user && savedAddresses.length === 0 && formData.address) {
+        handleSaveInlineAddress().catch(() => {})
+      }
+    } else if (deliveryType === "pickup") {
+      if (!validatePickup()) return
+    }
+
     if (!validatePayment()) return
 
     if (selectedPaymentMethod === "cod") {
-      // handleSubmit runs the full home/pickup validation itself, then creates the COD
-      // order directly -- exactly as the old step-3 "Place Order" button did.
       handleSubmit(e || { preventDefault() {} })
       return
     }
 
-    // Card / Tabby / Tamara go through createOrderThenPay, which does NOT self-validate.
-    // Mirror the lighter checks the old step-1 gate enforced before payment was reachable
-    // (email + phone + address for home; phone + store for pickup) -- deliberately not the
-    // stricter validateHomeDelivery, so an optional post code never blocks these methods.
-    if (deliveryType === "home") {
-      if (!formData.email || !formData.phone) {
-        setError("Please fill in email and phone number")
-        return
-      }
-      if (!formData.address) {
-        setShowAddressModal(true)
-        return
-      }
-    } else if (deliveryType === "pickup") {
-      if (!pickupDetails.phone || !pickupDetails.storeId) {
-        setError("Please fill in phone number and select a store")
-        return
-      }
-    }
     setError(null)
     createOrderThenPay()
   }
 
-  const handleEditAddressClick = (e, addr) => {
-    e.stopPropagation()
-    setEditingAddressId(addr._id)
-    setAddressDetails({
-      name: addr.name || "",
-      phone: addr.phone || "",
-      address: addr.address || "",
-      city: addr.city || "",
-      state: addr.state || "",
-      zipCode: addr.zipCode || "",
-      country: addr.country || currentCountry?.name || "Pakistan",
-      isDefault: addr.isDefault || false,
-    })
+  // Opens the edit address modal populated with address details
+  const handleEditAddress = (addrToEdit) => {
+    const targetAddr =
+      addrToEdit ||
+      savedAddresses.find((a) => a.address === formData.address && a.city === formData.city) ||
+      savedAddresses.find((a) => a.isDefault) ||
+      savedAddresses[0]
+
+    if (targetAddr) {
+      setEditingAddressId(targetAddr._id || null)
+      setAddressDetails({
+        name: targetAddr.name || formData.name || user?.name || "Home",
+        phone: targetAddr.phone || formData.phone || user?.phone || "",
+        address: targetAddr.address || formData.address || "",
+        city: targetAddr.city || formData.city || "",
+        state: targetAddr.state || formData.state || "",
+        zipCode: targetAddr.zipCode || formData.zipCode || "",
+        country: targetAddr.country || formData.country || currentCountry?.name || "Pakistan",
+        isDefault: targetAddr.isDefault ?? true,
+      })
+    } else {
+      setEditingAddressId(null)
+      setAddressDetails({
+        name: formData.name || user?.name || "Home",
+        phone: formData.phone || user?.phone || "",
+        address: formData.address || "",
+        city: formData.city || "",
+        state: formData.state || "",
+        zipCode: formData.zipCode || "",
+        country: formData.country || currentCountry?.name || "Pakistan",
+        isDefault: true,
+      })
+    }
     setShowAddressModal(true)
   }
 
-  // Update handleAddressModalSubmit to only save to localStorage for guests, and always update formData
+  const handleEditAddressClick = (e, addr) => {
+    if (e && typeof e.stopPropagation === "function") e.stopPropagation()
+    handleEditAddress(addr)
+  }
+
+  // Save or update address in user account
   const handleAddressModalSubmit = async (e) => {
     e.preventDefault()
     const newAddress = {
-      address: addressDetails.address,
-      city: addressDetails.city,
-      state: addressDetails.state,
-      zipCode: addressDetails.zipCode,
+      name: (addressDetails.name || formData.name || user?.name || "Home").trim(),
+      phone: (addressDetails.phone || formData.phone || user?.phone || "").trim(),
+      address: (addressDetails.address || "").trim(),
+      city: (addressDetails.city || "").trim(),
+      state: (addressDetails.state || "").trim(),
+      zipCode: (addressDetails.zipCode || "").trim(),
       country: addressDetails.country || currentCountry?.name || "Pakistan",
+    }
+
+    if (!newAddress.address || !newAddress.city || !newAddress.state) {
+      setError("Please fill in street address, city, and province/state.")
+      showToast("Please fill in all required address fields", "error")
+      return
     }
 
     if (user) {
       try {
         const token = localStorage.getItem("token")
         const payload = {
-          name: addressDetails.name || "Home",
-          phone: addressDetails.phone || formData.phone || user.phone || "",
+          name: newAddress.name,
+          phone: newAddress.phone,
           email: formData.email || user.email || "",
-          address: addressDetails.address,
-          city: addressDetails.city,
-          state: addressDetails.state,
-          zipCode: addressDetails.zipCode,
-          country: addressDetails.country || currentCountry?.name || "Pakistan",
+          address: newAddress.address,
+          city: newAddress.city,
+          state: newAddress.state,
+          zipCode: newAddress.zipCode,
+          country: newAddress.country,
           isDefault: addressDetails.isDefault,
         }
         
         let response
-        if (editingAddressId) {
+        if (editingAddressId && editingAddressId !== "root-address") {
           response = await axios.put(`${config.API_URL}/api/users/addresses/${editingAddressId}`, payload, {
             headers: { Authorization: `Bearer ${token}` },
           })
@@ -1560,46 +1731,150 @@ const Checkout = () => {
             headers: { Authorization: `Bearer ${token}` },
           })
         }
-        setSavedAddresses(response.data)
+
+        if (response?.data && Array.isArray(response.data)) {
+          setSavedAddresses(response.data)
+        }
+
+        // Also update the root user address and phone on profile so it is persisted
+        try {
+          await axios.put(
+            `${config.API_URL}/api/users/profile`,
+            {
+              phone: newAddress.phone,
+              address: {
+                street: newAddress.address,
+                city: newAddress.city,
+                state: newAddress.state,
+                zipCode: newAddress.zipCode,
+                country: newAddress.country,
+              },
+            },
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            }
+          )
+        } catch (profErr) {
+          console.error("Profile sync error:", profErr)
+        }
       } catch (err) {
-        // ignore/handle error
+        console.error("Error saving address:", err)
+        showToast(err?.response?.data?.message || "Failed to save address", "error")
+        return
       }
     }
 
+    // Update formData immediately so checkout updates right away
     setFormData((prev) => ({
       ...prev,
-      ...newAddress,
+      name: newAddress.name,
+      phone: newAddress.phone,
+      address: newAddress.address,
+      city: newAddress.city,
+      state: newAddress.state,
+      zipCode: newAddress.zipCode,
+      country: newAddress.country,
     }))
 
-    // Only save to localStorage if not logged in
-    if (!user) {
-      localStorage.setItem(
-        "savedShippingAddress",
-        JSON.stringify({
-          ...formData,
-          ...newAddress,
-        }),
-      )
-    }
+    setError(null)
     setShowAddressModal(false)
     setEditingAddressId(null)
-    // Do NOT advance step here; let main form handle it
+    showToast("Address saved successfully!", "success")
   }
 
-  // In handleContinueToSummary, always save address/phone to backend for logged-in users when deliveryType is 'home'
+  // Save address entered directly into the inline form fields
+  const handleSaveInlineAddress = async (e) => {
+    if (e && typeof e.preventDefault === "function") e.preventDefault()
+
+    const newAddress = {
+      name: (formData.name || user?.name || "Home").trim(),
+      phone: (formData.phone || user?.phone || "").trim(),
+      address: (formData.address || "").trim(),
+      city: (formData.city || "").trim(),
+      state: (formData.state || "").trim(),
+      zipCode: (formData.zipCode || "").trim(),
+      country: formData.country || currentCountry?.name || "Pakistan",
+    }
+
+    if (!newAddress.name) {
+      setError("Please enter your full name")
+      showToast("Please enter your full name", "error")
+      return false
+    }
+    if (!newAddress.phone) {
+      setError("Please enter your phone number")
+      showToast("Please enter your phone number", "error")
+      return false
+    }
+    if (!newAddress.address || !newAddress.city || !newAddress.state) {
+      setError("Please provide street address, city, and province/state")
+      showToast("Please provide street address, city, and province/state", "error")
+      return false
+    }
+
+    if (user) {
+      try {
+        const token = localStorage.getItem("token")
+        const payload = {
+          name: newAddress.name,
+          phone: newAddress.phone,
+          email: formData.email || user.email || "",
+          address: newAddress.address,
+          city: newAddress.city,
+          state: newAddress.state,
+          zipCode: newAddress.zipCode,
+          country: newAddress.country,
+          isDefault: true,
+        }
+
+        const response = await axios.post(`${config.API_URL}/api/users/addresses`, payload, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+
+        if (response?.data && Array.isArray(response.data)) {
+          setSavedAddresses(response.data)
+        }
+
+        try {
+          await axios.put(
+            `${config.API_URL}/api/users/profile`,
+            {
+              phone: newAddress.phone,
+              address: {
+                street: newAddress.address,
+                city: newAddress.city,
+                state: newAddress.state,
+                zipCode: newAddress.zipCode,
+                country: newAddress.country,
+              },
+            },
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            }
+          )
+        } catch (profErr) {
+          console.error("Profile sync error:", profErr)
+        }
+      } catch (err) {
+        console.error("Error saving inline address:", err)
+        showToast(err?.response?.data?.message || "Failed to save address", "error")
+        return false
+      }
+    }
+
+    setError(null)
+    showToast("Delivery address saved successfully!", "success")
+    return true
+  }
+
   const handleContinueToSummary = async (e) => {
-    e.preventDefault()
+    if (e && typeof e.preventDefault === "function") e.preventDefault()
     if (deliveryType === "home") {
-      if (!formData.email || !formData.phone) {
-        setError("Please fill in email and phone number")
-        return
-      }
-      if (!formData.address) {
-        setShowAddressModal(true)
-        return
-      }
-      // Save to backend if logged in
-      if (user) {
+      if (!validateHomeDelivery()) return
+
+      if (user && savedAddresses.length === 0 && formData.address) {
+        await handleSaveInlineAddress()
+      } else if (user && formData.address) {
         try {
           const token = localStorage.getItem("token")
           const payload = {
@@ -1616,29 +1891,23 @@ const Checkout = () => {
             headers: { Authorization: `Bearer ${token}` },
           })
         } catch (err) {
-          // Optionally show error
+          // ignore error
         }
       }
     } else if (deliveryType === "pickup") {
-      if (!pickupDetails.phone || !pickupDetails.storeId) {
-        setError("Please fill in phone number and select a store")
-        return
-      }
-      // Optionally, save phone to backend if logged in
+      if (!validatePickup()) return
       if (user && pickupDetails.phone) {
         try {
           const token = localStorage.getItem("token")
-          const payload = { phone: pickupDetails.phone }
-          await axios.put(`${config.API_URL}/api/users/profile`, payload, {
+          await axios.put(`${config.API_URL}/api/users/profile`, { phone: pickupDetails.phone }, {
             headers: { Authorization: `Bearer ${token}` },
           })
         } catch (err) {
-          // Optionally show error
+          // ignore error
         }
       }
     }
     setError(null)
-    // Edited from the folded section on the payment step: stay there and fold it up.
     if (step === 3) {
       setOpenReviewStep(null)
       return
@@ -1729,42 +1998,62 @@ const Checkout = () => {
 
   // Fetch user profile and pre-fill address/phone if logged in
   useEffect(() => {
+    let isMounted = true
     const fetchUserProfile = async () => {
-      if (user) {
-        try {
-          const token = localStorage.getItem("token")
-          const { data } = await axios.get(`${config.API_URL}/api/users/profile`, {
-            headers: { Authorization: `Bearer ${token}` },
-          })
-          
-          const userAddresses = data.addresses || []
-          setSavedAddresses(userAddresses)
+      if (!user) return
+      try {
+        const token = localStorage.getItem("token")
+        if (!token) return
 
-          const defaultAddr = userAddresses.find((a) => a.isDefault) || userAddresses[0]
+        const { data } = await axios.get(`${config.API_URL}/api/users/profile`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!isMounted) return
 
-          // Fill formData and pickupDetails.phone
-          setFormData((prev) => ({
-            ...prev,
-            name: defaultAddr?.name || data.name || prev.name,
-            email: defaultAddr?.email || data.email || prev.email,
-            phone: defaultAddr?.phone || data.phone || prev.phone || "",
-            address: defaultAddr ? defaultAddr.address : (data.address?.street || prev.address || ""),
-            city: defaultAddr ? defaultAddr.city : (data.address?.city || prev.city || ""),
-            state: defaultAddr ? defaultAddr.state : (data.address?.state || prev.state || ""),
-            zipCode: defaultAddr ? defaultAddr.zipCode : (data.address?.zipCode || prev.zipCode || ""),
-            country: currentCountry?.name || defaultAddr?.country || data.address?.country || prev.country || "Pakistan",
-          }))
-          setPickupDetails((prev) => ({
-            ...prev,
-            phone: defaultAddr?.phone || data.phone || prev.phone || "",
-          }))
-        } catch (err) {
-          // ignore error
-        }
+        const userAddresses = Array.isArray(data.addresses) && data.addresses.length > 0
+          ? data.addresses
+          : (data.address?.street
+            ? [{
+                _id: "root-address",
+                name: data.name || user?.name || "Home",
+                phone: data.phone || user?.phone || "",
+                address: data.address.street,
+                city: data.address.city || "",
+                state: data.address.state || "",
+                zipCode: data.address.zipCode || "",
+                country: data.address.country || currentCountry?.name || "Pakistan",
+                isDefault: true,
+              }]
+            : [])
+        setSavedAddresses(userAddresses)
+
+        const defaultAddr = userAddresses.find((a) => a.isDefault) || userAddresses[0]
+
+        // Pre-fill formData
+        setFormData((prev) => ({
+          ...prev,
+          name: defaultAddr?.name || data.name || prev.name || user?.name || "",
+          email: defaultAddr?.email || data.email || prev.email || user?.email || "",
+          phone: defaultAddr?.phone || data.phone || prev.phone || user?.phone || "",
+          address: defaultAddr ? defaultAddr.address : (data.address?.street || prev.address || ""),
+          city: defaultAddr ? defaultAddr.city : (data.address?.city || prev.city || ""),
+          state: defaultAddr ? defaultAddr.state : (data.address?.state || prev.state || ""),
+          zipCode: defaultAddr ? defaultAddr.zipCode : (data.address?.zipCode || prev.zipCode || ""),
+          country: currentCountry?.name || defaultAddr?.country || data.address?.country || prev.country || "Pakistan",
+        }))
+        setPickupDetails((prev) => ({
+          ...prev,
+          phone: defaultAddr?.phone || data.phone || prev.phone || user?.phone || "",
+        }))
+      } catch (err) {
+        console.error("Error loading user profile:", err)
       }
     }
     fetchUserProfile()
-  }, [user])
+    return () => {
+      isMounted = false
+    }
+  }, [user, currentCountry?.name])
 
   // Sync phone number between forms when switching delivery type
   useEffect(() => {
@@ -1875,221 +2164,419 @@ const Checkout = () => {
 
   const renderShippingForm = (inline = false, hideActions = false) => (
     <>
-                  {deliveryType === "home" && (
-                    <form onSubmit={handleContinueToSummary}>
-                      <h3 className="font-bold text-sm mb-3"><TranslatedText>Contact Details</TranslatedText></h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                        <div>
-                          <label className="block text-xs font-medium mb-1"><TranslatedText>E-mail</TranslatedText> *</label>
-                          <input
-                            type="email"
-                            name="email"
-                            value={formData.email}
-                            onChange={handleChange}
-                            className="w-full border rounded-lg px-3 py-2 text-sm"
-                            required
-                          />
-                        </div>
-                        <div>
-                          <label className="block -mt-2 text-sm font-medium mb-2 "><TranslatedText>Phone number</TranslatedText> *</label>
-                          <PhoneInput
-                            international
-                            defaultCountry="PK"
-                            value={withDialCode(formData.phone)}
-                            onChange={(value) => setFormData({ ...formData, phone: value || '' })}
-                            className="w-full -mt-2 rounded-lg px-3 py-2 text-sm"
-                            placeholder="Enter phone number"
-                          />
-                        </div>
-                      </div>
+      {deliveryType === "home" && (
+        <form onSubmit={handleContinueToSummary}>
+          <h3 className="font-bold text-sm mb-3"><TranslatedText>Contact Details</TranslatedText></h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="block text-xs font-medium mb-1"><TranslatedText>Full Name</TranslatedText> *</label>
+              <input
+                type="text"
+                name="name"
+                value={formData.name}
+                onChange={handleChange}
+                placeholder="Full Name"
+                className="w-full border rounded-lg px-3 py-2 text-sm bg-white"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1"><TranslatedText>E-mail</TranslatedText> *</label>
+              <input
+                type="email"
+                name="email"
+                value={formData.email}
+                onChange={handleChange}
+                placeholder="Email address"
+                className="w-full border rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-700"
+                required
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-xs font-medium mb-1"><TranslatedText>Phone number</TranslatedText> *</label>
+              <PhoneInput
+                international
+                defaultCountry="PK"
+                value={withDialCode(formData.phone)}
+                onChange={(value) => setFormData({ ...formData, phone: value || '' })}
+                className="w-full border rounded-lg px-3 py-2 text-sm bg-white"
+                placeholder="Enter phone number"
+              />
+            </div>
+          </div>
 
-                      {/* Amazon-style address block: only the chosen address shows; "Change"
-                          reveals the full list to pick another, edit, or add one. */}
-                      {user && savedAddresses.length > 0 && (
-                        <div className="mb-4">
-                          {!showAddressList ? (
-                            <>
-                              <div className="mb-2 flex items-center justify-between">
-                                <h4 className="text-sm font-bold text-gray-900">
-                                  <TranslatedText>Delivery address</TranslatedText>
-                                </h4>
-                                <button
-                                  type="button"
-                                  onClick={() => setShowAddressList(true)}
-                                  className="text-sm font-semibold text-lime-700 hover:underline"
-                                >
-                                  <TranslatedText>Change / Edit</TranslatedText>
-                                </button>
-                              </div>
-                              {(() => {
-                                const selectedAddr =
-                                  savedAddresses.find(
-                                    (a) => a.address === formData.address && a.city === formData.city,
-                                  ) || savedAddresses[0]
-                                if (!selectedAddr) return null
-                                return (
-                                  <div className="flex items-start gap-3 rounded-xl border-2 border-lime-500 bg-lime-50/40 p-3">
-                                    <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border-2 border-lime-600">
-                                      <span className="h-2.5 w-2.5 rounded-full bg-lime-600" />
-                                    </span>
-                                    <div className="min-w-0">
-                                      <p className="font-bold text-gray-900">{selectedAddr.name}</p>
-                                      <p className="text-sm text-gray-700">
-                                        {[selectedAddr.address, selectedAddr.city, selectedAddr.state, selectedAddr.country]
-                                          .filter(Boolean)
-                                          .join(", ")}
-                                      </p>
-                                      {selectedAddr.phone && (
-                                        <p className="text-sm text-gray-700">
-                                          <TranslatedText>Phone number:</TranslatedText> {selectedAddr.phone}
-                                        </p>
-                                      )}
-                                    </div>
-                                  </div>
-                                )
-                              })()}
-                            </>
-                          ) : (
-                            <>
-                              <h4 className="mb-3 text-sm font-bold text-gray-900">
-                                <TranslatedText>Delivery addresses</TranslatedText> ({savedAddresses.length})
-                              </h4>
-                              <div className="space-y-1">
-                                {savedAddresses.map((addr) => {
-                                  const isSelected = formData.address === addr.address && formData.city === addr.city
-                                  return (
-                                    <label
-                                      key={addr._id}
-                                      className="flex cursor-pointer items-start gap-3 rounded-lg p-2 hover:bg-gray-50"
-                                    >
-                                      <input
-                                        type="radio"
-                                        name="deliveryAddress"
-                                        checked={isSelected}
-                                        onChange={() => {
-                                          setFormData((prev) => ({
-                                            ...prev,
-                                            address: addr.address,
-                                            city: addr.city,
-                                            state: addr.state,
-                                            zipCode: addr.zipCode,
-                                            country: addr.country || currentCountry?.name || "Pakistan",
-                                          }))
-                                          // Amazon collapses back to the chosen address once picked.
-                                          setShowAddressList(false)
-                                        }}
-                                        className="mt-1 h-4 w-4 shrink-0 accent-lime-600"
-                                      />
-                                      <div className="min-w-0">
-                                        <p className="font-bold text-gray-900">{addr.name}</p>
-                                        <p className="text-sm text-gray-700">
-                                          {[addr.address, addr.city, addr.state, addr.country].filter(Boolean).join(", ")}
-                                        </p>
-                                        {addr.phone && (
-                                          <p className="text-sm text-gray-700">
-                                            <TranslatedText>Phone number:</TranslatedText> {addr.phone}
-                                          </p>
-                                        )}
-                                        <div className="mt-1 flex items-center gap-2 text-sm">
-                                          <button
-                                            type="button"
-                                            onClick={(e) => handleEditAddressClick(e, addr)}
-                                            className="font-semibold text-lime-700 hover:underline"
-                                          >
-                                            <TranslatedText>Edit address</TranslatedText>
-                                          </button>
-                                        </div>
-                                      </div>
-                                    </label>
-                                  )
-                                })}
-                              </div>
-
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingAddressId(null)
-                                  setAddressDetails({
-                                    address: "",
-                                    zip: "",
-                                    country: currentCountry?.name || "Pakistan",
-                                    state: "",
-                                    city: "",
-                                    isDefault: false,
-                                  })
-                                  setShowAddressModal(true)
-                                }}
-                                className="mt-3 flex items-center gap-1.5 text-sm font-semibold text-lime-700 hover:underline"
-                              >
-                                <Plus size={16} />
-                                <TranslatedText>Add a new delivery address</TranslatedText>
-                              </button>
-                            </>
-                          )}
-                        </div>
+          {/* Saved Addresses Section */}
+          {user && savedAddresses.length > 0 && (
+            <div className="mb-4">
+              {!showAddressList ? (
+                <>
+                  <div className="mb-2 flex items-center justify-between">
+                    <h4 className="text-sm font-bold text-gray-900">
+                      <TranslatedText>Delivery Address</TranslatedText>
+                    </h4>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => handleEditAddress()}
+                        className="text-xs font-semibold text-lime-700 hover:underline"
+                      >
+                        <TranslatedText>Edit</TranslatedText>
+                      </button>
+                      {savedAddresses.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAddressList(true)}
+                          className="text-xs font-semibold text-stone-600 hover:underline"
+                        >
+                          <TranslatedText>Change</TranslatedText>
+                        </button>
                       )}
-
-                      {formData.address && (!user || savedAddresses.length === 0) && (
-                        <div className="mb-4 bg-gray-50 p-3 rounded-lg">
-                          <h4 className="font-semibold mb-1"><TranslatedText>Shipping Address</TranslatedText></h4>
-                          <div className="text-gray-700">{formData.address}</div>
-                          <div className="text-gray-700">
-                            {formData.city}, {formData.state} {formData.zipCode}
+                      <button
+                        type="button"
+                        onClick={() => handleEditAddress(null)}
+                        className="text-xs font-semibold text-stone-600 hover:underline flex items-center gap-1"
+                      >
+                        <Plus size={14} />
+                        <TranslatedText>Add New</TranslatedText>
+                      </button>
+                    </div>
+                  </div>
+                  {(() => {
+                    const selectedAddr =
+                      savedAddresses.find(
+                        (a) => a.address === formData.address && a.city === formData.city,
+                      ) || savedAddresses[0]
+                    if (!selectedAddr) return null
+                    return (
+                      <div className="rounded-xl border-2 border-lime-500 bg-lime-50/40 p-3.5">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-start gap-3">
+                            <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border-2 border-lime-600">
+                              <span className="h-2.5 w-2.5 rounded-full bg-lime-600" />
+                            </span>
+                            <div className="min-w-0">
+                              <p className="font-bold text-gray-900">{selectedAddr.name}</p>
+                              <p className="text-sm text-gray-700">
+                                {[selectedAddr.address, selectedAddr.city, selectedAddr.state, selectedAddr.country]
+                                  .filter(Boolean)
+                                  .join(", ")}
+                                {selectedAddr.zipCode ? ` - ${selectedAddr.zipCode}` : ""}
+                              </p>
+                              {selectedAddr.phone && (
+                                <p className="text-xs text-gray-600 mt-1">
+                                  <TranslatedText>Phone:</TranslatedText> {selectedAddr.phone}
+                                </p>
+                              )}
+                            </div>
                           </div>
                           <button
                             type="button"
-                            onClick={() => setShowAddressModal(true)}
-                            className="text-lime-500 text-sm mt-2 mr-4"
+                            onClick={() => handleEditAddress(selectedAddr)}
+                            className="text-xs font-semibold text-lime-700 hover:underline flex-shrink-0"
                           >
-                            <TranslatedText>Edit Address</TranslatedText>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setFormData((prev) => ({
-                                ...prev,
-                                address: "",
-                                city: "",
-                                state: "",
-                                zipCode: "",
-                              }))
-                              localStorage.removeItem("savedShippingAddress")
-                            }}
-                            className="text-red-500 text-sm mt-2"
-                          >
-                            <TranslatedText>Remove Address</TranslatedText>
+                            <TranslatedText>Edit</TranslatedText>
                           </button>
                         </div>
-                      )}
-
-                      {!hideActions && (
-                      <div className="mt-8 flex gap-4 ">
-                        {!inline && (
+                      </div>
+                    )
+                  })()}
+                </>
+              ) : (
+                <>
+                  <div className="mb-3 flex items-center justify-between">
+                    <h4 className="text-sm font-bold text-gray-900">
+                      <TranslatedText>Delivery Addresses</TranslatedText> ({savedAddresses.length})
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddressList(false)}
+                      className="text-xs font-semibold text-stone-500 hover:text-stone-800"
+                    >
+                      <TranslatedText>Close</TranslatedText>
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {savedAddresses.map((addr) => {
+                      const isSelected = formData.address === addr.address && formData.city === addr.city
+                      return (
+                        <label
+                          key={addr._id}
+                          className={`flex cursor-pointer items-start justify-between gap-3 rounded-lg border p-3 transition ${
+                            isSelected ? "border-lime-500 bg-lime-50/30" : "border-gray-200 hover:bg-gray-50"
+                          }`}
+                        >
+                          <div className="flex items-start gap-3 min-w-0">
+                            <input
+                              type="radio"
+                              name="deliveryAddress"
+                              checked={isSelected}
+                              onChange={() => {
+                                setFormData((prev) => ({
+                                  ...prev,
+                                  name: addr.name || prev.name,
+                                  phone: addr.phone || prev.phone,
+                                  address: addr.address,
+                                  city: addr.city,
+                                  state: addr.state,
+                                  zipCode: addr.zipCode,
+                                  country: addr.country || currentCountry?.name || "Pakistan",
+                                }))
+                                setShowAddressList(false)
+                              }}
+                              className="mt-1 h-4 w-4 shrink-0 accent-lime-600"
+                            />
+                            <div className="min-w-0">
+                              <p className="font-bold text-gray-900">{addr.name}</p>
+                              <p className="text-sm text-gray-700">
+                                {[addr.address, addr.city, addr.state, addr.country].filter(Boolean).join(", ")}
+                                {addr.zipCode ? ` - ${addr.zipCode}` : ""}
+                              </p>
+                              {addr.phone && (
+                                <p className="text-xs text-gray-600 mt-0.5">
+                                  <TranslatedText>Phone:</TranslatedText> {addr.phone}
+                                </p>
+                              )}
+                            </div>
+                          </div>
                           <button
                             type="button"
-                            onClick={() => navigate("/cart")}
-                            className="flex-1 border border-gray-300 hover:bg-gray-100 text-gray-700 bg-red-500 font-semibold lg:py-3 lg:px-6 py-2 px-3 rounded-lg transition duration-300"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              handleEditAddress(addr)
+                            }}
+                            className="text-xs font-semibold text-lime-700 hover:underline flex-shrink-0"
                           >
-                            <TranslatedText>Back to Cart</TranslatedText>
+                            <TranslatedText>Edit</TranslatedText>
                           </button>
-                        )}
-                        <button
-                          type="submit"
-                          className="flex-1 bg-lime-500 hover:bg-lime-600 text-white font-semibold lg:py-3 lg:px-6 py-2 px-3 rounded-lg transition duration-300"
-                        >
-                          {inline ? (
-                            <TranslatedText>Save changes</TranslatedText>
-                          ) : (
-                            <>
-                              <span className="block lg:hidden"><TranslatedText>Continue Summary</TranslatedText></span> {/* Mobile */}
-                              <span className="hidden lg:block"><TranslatedText>Continue to Summary</TranslatedText></span> {/* Desktop */}
-                            </>
-                          )}
-                        </button>
-                      </div>
-                      )}
-                    </form>
-                  )}
+                        </label>
+                      )
+                    })}
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => handleEditAddress(null)}
+                      className="flex items-center gap-1.5 text-sm font-semibold text-lime-700 hover:underline"
+                    >
+                      <Plus size={16} />
+                      <TranslatedText>Add a new delivery address</TranslatedText>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddressList(false)}
+                      className="text-xs text-stone-500 hover:underline"
+                    >
+                      <TranslatedText>Done</TranslatedText>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* When user has no savedAddresses list, but has an address in formData */}
+          {formData.address && (!user || savedAddresses.length === 0) && (
+            <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-3.5">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h4 className="font-semibold text-sm mb-1 text-gray-900"><TranslatedText>Shipping Address</TranslatedText></h4>
+                  <div className="text-sm text-gray-700">{formData.address}</div>
+                  <div className="text-sm text-gray-700">
+                    {[formData.city, formData.state, formData.zipCode, formData.country].filter(Boolean).join(", ")}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleEditAddress()}
+                  className="text-xs font-semibold text-lime-700 hover:underline"
+                >
+                  <TranslatedText>Edit Address</TranslatedText>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* When user has NO saved addresses and NO formData.address: Provide complete, clear address form right here */}
+          {!formData.address && savedAddresses.length === 0 && (
+            <div className="mb-4 rounded-xl border border-stone-200 bg-stone-50/70 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-bold text-gray-900">
+                    <TranslatedText>Delivery Address</TranslatedText>
+                  </h4>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    <TranslatedText>Please provide your complete delivery address below.</TranslatedText>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleEditAddress(null)}
+                  className="text-xs font-semibold text-lime-700 hover:underline flex items-center gap-1"
+                >
+                  <Plus size={14} />
+                  <TranslatedText>Open in Window</TranslatedText>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <label className={addressLabelClass}>
+                    <TranslatedText>Country</TranslatedText> <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <select
+                      className={addressSelectClass}
+                      value={formData.country || currentCountry?.name || "Pakistan"}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, country: e.target.value, state: "" }))}
+                      required
+                    >
+                      {(countries || []).map((c) => (
+                        <option key={c.code} value={c.name}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={16} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  </div>
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className={addressLabelClass}>
+                    <TranslatedText>Complete Street Address</TranslatedText> <span className="text-red-500">*</span>
+                  </label>
+                  <AddressAutocomplete
+                    value={formData.address}
+                    onChange={(v) => setFormData((prev) => ({ ...prev, address: v }))}
+                    onSelect={(sel) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        address: sel.address,
+                        city: sel.city || prev.city,
+                        state: sel.state || prev.state,
+                        zipCode: sel.zipCode || prev.zipCode,
+                      }))
+                    }
+                    countryName={formData.country || currentCountry?.name || "Pakistan"}
+                    countryCode={(countries || []).find((c) => c.name === (formData.country || currentCountry?.name))?.code || currentCountry?.code}
+                    inputClassName={addressInputClass}
+                    placeholder="House/Apartment number, street name, area"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className={addressLabelClass}>
+                    <TranslatedText>State / Province</TranslatedText> <span className="text-red-500">*</span>
+                  </label>
+                  {(() => {
+                    const selectedCountryName = formData.country || currentCountry?.name || "Pakistan"
+                    const provinces = getProvincesForCountry(selectedCountryName)
+                    if (provinces && provinces.length > 0) {
+                      return (
+                        <div className="relative">
+                          <select
+                            className={addressSelectClass}
+                            value={formData.state}
+                            onChange={(e) => setFormData((prev) => ({ ...prev, state: e.target.value }))}
+                            required
+                          >
+                            <option value="">Select Province</option>
+                            {provinces.map((prov) => (
+                              <option key={prov} value={prov}>
+                                {prov}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown size={16} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        </div>
+                      )
+                    }
+                    return (
+                      <input
+                        type="text"
+                        className={addressInputClass}
+                        value={formData.state}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, state: e.target.value }))}
+                        placeholder="State / Province"
+                        required
+                      />
+                    )
+                  })()}
+                </div>
+
+                <div>
+                  <label className={addressLabelClass}>
+                    <TranslatedText>City</TranslatedText> <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    className={addressInputClass}
+                    value={formData.city}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, city: e.target.value }))}
+                    placeholder="City"
+                    required
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className={addressLabelClass}>
+                    <TranslatedText>Postal / ZIP Code</TranslatedText>{" "}
+                    <span className="font-normal text-gray-400">
+                      (<TranslatedText>optional</TranslatedText>)
+                    </span>
+                  </label>
+                  <input
+                    type="text"
+                    className={addressInputClass}
+                    value={formData.zipCode}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, zipCode: e.target.value }))}
+                    placeholder="e.g. 54000"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleSaveInlineAddress}
+                  className="rounded-lg bg-lime-600 px-4 py-2 text-xs font-semibold text-white hover:bg-lime-700 transition"
+                >
+                  <TranslatedText>Save Address</TranslatedText>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!hideActions && (
+            <div className="mt-8 flex gap-4">
+              {!inline && (
+                <button
+                  type="button"
+                  onClick={() => navigate(getLocalizedPath("/cart"))}
+                  className="flex-1 border border-gray-300 hover:bg-gray-50 text-gray-700 bg-white font-semibold lg:py-3 lg:px-6 py-2 px-3 rounded-lg transition duration-300"
+                >
+                  <TranslatedText>Back to Cart</TranslatedText>
+                </button>
+              )}
+              <button
+                type="submit"
+                className="flex-1 bg-lime-500 hover:bg-lime-600 text-white font-semibold lg:py-3 lg:px-6 py-2 px-3 rounded-lg transition duration-300"
+              >
+                {inline ? (
+                  <TranslatedText>Save changes</TranslatedText>
+                ) : (
+                  <>
+                    <span className="block lg:hidden"><TranslatedText>Continue Summary</TranslatedText></span>
+                    <span className="hidden lg:block"><TranslatedText>Continue to Summary</TranslatedText></span>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+        </form>
+      )}
 
                   {deliveryType === "pickup" && (
                     <form onSubmit={handleContinueToSummary}>
@@ -2366,7 +2853,9 @@ const Checkout = () => {
   const deliveryDetailLine =
     deliveryType === "home"
       ? formData.address
-        ? [formData.address, formData.city, formData.state, formData.country].filter(Boolean).join(", ")
+        ? [formData.name, formData.address, formData.city, formData.state, formData.country]
+            .filter(Boolean)
+            .join(", ")
         : "No delivery address selected yet"
       : selectedStore
         ? [selectedStore.name, selectedStore.address].filter(Boolean).join(" · ")
@@ -2426,6 +2915,28 @@ const Checkout = () => {
   const paymentSummary =
     PAYMENT_METHODS.find((m) => m.id === selectedPaymentMethod)?.name || "Choose how you'd like to pay"
 
+  if (authLoading) {
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-stone-200 border-t-lime-600" />
+        <p className="text-sm font-medium text-stone-500">
+          <TranslatedText>Checking your account…</TranslatedText>
+        </p>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-stone-200 border-t-lime-600" />
+        <p className="text-sm font-medium text-stone-500">
+          <TranslatedText>Redirecting to sign in…</TranslatedText>
+        </p>
+      </div>
+    )
+  }
+
   return (
     <div className="mx-auto w-full max-w-[1180px] px-4 py-8 text-sm sm:px-6 lg:px-8">
       <div>
@@ -2455,16 +2966,13 @@ const Checkout = () => {
                   )}
                 </div>
                 <div className="flex flex-shrink-0 items-center gap-4 text-sm">
-                  {deliveryType === "home" && savedAddresses.length > 0 && (
+                  {deliveryType === "home" && (
                     <button
                       type="button"
-                      onClick={() => {
-                        setShowAddressList(true)
-                        goToSection("checkout-delivery")
-                      }}
+                      onClick={() => handleEditAddress()}
                       className="font-semibold text-stone-900 underline underline-offset-4 hover:text-brand-700"
                     >
-                      <TranslatedText>Change address</TranslatedText>
+                      <TranslatedText>{formData.address ? "Edit address" : "Add address"}</TranslatedText>
                     </button>
                   )}
                   <button
@@ -2706,11 +3214,41 @@ const Checkout = () => {
               </div>
               <div className="flex flex-col lg:flex-row">
               <div className="divide-y divide-gray-100 lg:flex-1 lg:min-w-0">
-                {regularCartItems.map((item) => {
-                  const atMax = item.maxPurchaseQty && item.quantity >= item.maxPurchaseQty
+                {regularCartItems.map((item, idx) => {
+                  const sizeStock = item.selectedSizeData && item.selectedSizeData.countInStock !== undefined && item.selectedSizeData.countInStock !== null
+                    ? Number(item.selectedSizeData.countInStock)
+                    : (item.countInStock !== undefined && item.countInStock !== null ? Number(item.countInStock) : null)
+                  const sizeLabel = item.selectedSizeData?.code || item.selectedSizeData?.name
+                  const isOutOfStock = sizeStock !== null && sizeStock <= 0
+                  const maxStockLimit = sizeStock !== null ? sizeStock : (item.maxPurchaseQty || 9999)
+                  const effectiveMaxQty = item.maxPurchaseQty ? Math.min(item.maxPurchaseQty, maxStockLimit) : maxStockLimit
+                  const atMax = item.quantity >= effectiveMaxQty || isOutOfStock
                   const pd = getItemPricingDetails(item)
+                  const lineIdentifier = item.cartId || item._id
+
+                  const handleDecreaseQty = () => {
+                    if (item.quantity <= 1) return
+                    updateQuantity(lineIdentifier, item.quantity - 1, item.bundleId)
+                  }
+
+                  const handleIncreaseQty = () => {
+                    if (isOutOfStock) {
+                      showToast(sizeLabel ? `Size ${sizeLabel} is currently out of stock.` : `${item.name} is currently out of stock.`, "error")
+                      return
+                    }
+                    if (item.quantity >= effectiveMaxQty) {
+                      if (sizeStock !== null && item.quantity >= sizeStock) {
+                        showToast(sizeLabel ? `Only ${sizeStock} units are available in size ${sizeLabel}.` : `Only ${sizeStock} units are available.`, "error")
+                      } else if (item.maxPurchaseQty && item.quantity >= item.maxPurchaseQty) {
+                        showToast(`Maximum purchase limit of ${item.maxPurchaseQty} reached for this item.`, "error")
+                      }
+                      return
+                    }
+                    updateQuantity(lineIdentifier, item.quantity + 1, item.bundleId)
+                  }
+
                   return (
-                    <div key={item._id} className="relative flex gap-3 px-4 py-3 sm:px-5">
+                    <div key={item.cartId || `${item._id}_${sizeLabel || "nosize"}_${idx}`} className="relative flex gap-3 px-4 py-3 sm:px-5">
                       {/* Delete lives on its own in the top-right corner, behind a
                           confirmation, so it can never be hit by tapping the minus. */}
                       <button
@@ -2734,12 +3272,46 @@ const Checkout = () => {
                           <TranslatedText text={item.name} />
                         </p>
                         {item.selectedSizeData && (
-                          <p className="mt-0.5 text-xs text-amber-700 font-medium">
-                            <TranslatedText>Size:</TranslatedText> {item.selectedSizeData.code || item.selectedSizeData.name}
-                            {Number(item.selectedSizeData.additionalPrice) > 0 && (
-                              <span className="text-amber-600 font-normal"> (+{formatPrice(item.selectedSizeData.additionalPrice)})</span>
+                          <div className="mt-0.5 flex items-center gap-2 flex-wrap">
+                            <p className="text-xs text-amber-700 font-medium">
+                              <TranslatedText>Size:</TranslatedText> {item.selectedSizeData.code || item.selectedSizeData.name}
+                              {Number(item.selectedSizeData.additionalPrice) > 0 && (
+                                <span className="text-amber-600 font-normal"> (+{formatPrice(item.selectedSizeData.additionalPrice)})</span>
+                              )}
+                            </p>
+                            {sizeStock !== null && (
+                              sizeStock <= 0 ? (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-semibold bg-red-100 text-red-700">
+                                  Out of Stock
+                                </span>
+                              ) : sizeStock <= 5 ? (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-amber-50 text-amber-800 border border-amber-200">
+                                  Only {sizeStock} available in size {sizeLabel}
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200">
+                                  {sizeStock} available
+                                </span>
+                              )
                             )}
-                          </p>
+                          </div>
+                        )}
+                        {!item.selectedSizeData && sizeStock !== null && (
+                          <div className="mt-0.5 text-xs">
+                            {sizeStock <= 0 ? (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-semibold bg-red-100 text-red-700">
+                                Out of Stock
+                              </span>
+                            ) : sizeStock <= 5 ? (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-amber-50 text-amber-800 border border-amber-200">
+                                Only {sizeStock} available
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200">
+                                {sizeStock} in stock
+                              </span>
+                            )}
+                          </div>
                         )}
                         {item.selectedColorData && (
                           <p className="mt-0.5 text-xs text-purple-600 font-medium">
@@ -2778,7 +3350,7 @@ const Checkout = () => {
                           <button
                             type="button"
                             aria-label="Decrease quantity"
-                            onClick={() => updateQuantity(item._id, item.quantity - 1)}
+                            onClick={handleDecreaseQty}
                             disabled={item.quantity <= 1}
                             className="grid h-7 w-8 place-items-center text-gray-600 hover:text-gray-900 disabled:opacity-40 disabled:cursor-not-allowed"
                           >
@@ -2790,7 +3362,7 @@ const Checkout = () => {
                           <button
                             type="button"
                             aria-label="Increase quantity"
-                            onClick={() => updateQuantity(item._id, item.quantity + 1)}
+                            onClick={handleIncreaseQty}
                             disabled={atMax}
                             className="grid h-7 w-8 place-items-center text-gray-600 hover:text-gray-900 disabled:opacity-40 disabled:cursor-not-allowed"
                           >
@@ -2953,7 +3525,13 @@ const Checkout = () => {
                   </div>
                   <button
                     type="button"
-                    onClick={() => goToSection("checkout-delivery")}
+                    onClick={() => {
+                      if (deliveryType === "home") {
+                        handleEditAddress()
+                      } else {
+                        goToSection("checkout-delivery")
+                      }
+                    }}
                     className="flex-shrink-0 text-xs font-semibold text-stone-900 underline underline-offset-4 hover:text-brand-700"
                   >
                     <TranslatedText>Edit</TranslatedText>
@@ -2971,7 +3549,13 @@ const Checkout = () => {
                   </div>
                   <button
                     type="button"
-                    onClick={() => goToSection("checkout-delivery")}
+                    onClick={() => {
+                      if (deliveryType === "home") {
+                        handleEditAddress()
+                      } else {
+                        goToSection("checkout-delivery")
+                      }
+                    }}
                     className="flex-shrink-0 text-xs font-semibold text-stone-900 underline underline-offset-4 hover:text-brand-700"
                   >
                     <TranslatedText>Edit</TranslatedText>
@@ -3200,7 +3784,7 @@ const Checkout = () => {
             <Dialog.Panel className="flex w-full max-w-xl max-h-[92vh] sm:max-h-[90vh] flex-col overflow-hidden rounded-t-2xl sm:rounded-2xl bg-white shadow-2xl">
               <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
                 <Dialog.Title className="text-lg font-bold text-gray-900">
-                  <TranslatedText>{editingAddressId ? "Edit Address" : "Add Address"}</TranslatedText>
+                  <TranslatedText>{editingAddressId ? "Edit Delivery Address" : "Add Delivery Address"}</TranslatedText>
                 </Dialog.Title>
                 <button
                   type="button"
@@ -3217,14 +3801,14 @@ const Checkout = () => {
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className={addressLabelClass}>
-                        <TranslatedText>Address Label</TranslatedText> <span className="text-red-500">*</span>
+                        <TranslatedText>Full Name / Label</TranslatedText> <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="text"
                         className={addressInputClass}
                         value={addressDetails.name}
                         onChange={(e) => setAddressDetails({ ...addressDetails, name: e.target.value })}
-                        placeholder="Home, Office…"
+                        placeholder="Full name or address label (e.g. Home, Office)"
                         required
                       />
                     </div>
@@ -3425,7 +4009,7 @@ const Checkout = () => {
                 <button
                   type="button"
                   onClick={() => {
-                    if (itemToDelete) removeFromCart(itemToDelete._id)
+                    if (itemToDelete) removeFromCart(itemToDelete.cartId || itemToDelete._id, itemToDelete.bundleId)
                     setItemToDelete(null)
                   }}
                   className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"

@@ -2186,8 +2186,20 @@ router.post(
           name: String(s.name || "").trim(),
           code: String(s.code || "").trim(),
           additionalPrice: Number(s.additionalPrice) >= 0 ? Number(s.additionalPrice) : 0,
+          countInStock: Number(s.countInStock) >= 0 ? Number(s.countInStock) : 0,
         }))
         .filter((s) => s.size || s.name || s.code)
+
+      if (productData.sizes.length > 0) {
+        const totalSizeStock = productData.sizes.reduce((sum, s) => sum + (Number(s.countInStock) || 0), 0)
+        productData.countInStock = totalSizeStock
+        if (productData.stockStatus !== "PreOrder") {
+          productData.stockStatus = totalSizeStock > 0 ? "In Stock" : "Out of Stock"
+          if (stockStatusAr) {
+            stockStatusAr = await translateText(productData.stockStatus)
+          }
+        }
+      }
     }
 
     const product = new Product({
@@ -2445,9 +2457,18 @@ router.put(
                 name: String(s.name || "").trim(),
                 code: String(s.code || "").trim(),
                 additionalPrice: Number(s.additionalPrice) >= 0 ? Number(s.additionalPrice) : 0,
+                countInStock: Number(s.countInStock) >= 0 ? Number(s.countInStock) : 0,
               }))
               .filter((s) => s.size || s.name || s.code)
           : []
+
+        if (updateData.sizes.length > 0) {
+          const totalSizeStock = updateData.sizes.reduce((sum, s) => sum + (Number(s.countInStock) || 0), 0)
+          updateData.countInStock = totalSizeStock
+          if (updateData.stockStatus !== "PreOrder" && product.stockStatus !== "PreOrder") {
+            updateData.stockStatus = totalSizeStock > 0 ? "In Stock" : "Out of Stock"
+          }
+        }
       }
 
       // Update product fields
