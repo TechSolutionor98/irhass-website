@@ -32,6 +32,10 @@ const bannerSchema = mongoose.Schema(
       required: true,
       enum: [
         "hero",
+        "hero-desktop",
+        "hero-mobile",
+        "second-banner-desktop",
+        "second-banner-mobile",
         "category",
         "promotional",
         "footer",

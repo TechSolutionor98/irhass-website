@@ -109,7 +109,9 @@ const Home = () => {
   const [categories, setCategories] = useState([])
   const [banners, setBanners] = useState([])
   const [heroBanners, setHeroBanners] = useState([])
+  const [secondBanners, setSecondBanners] = useState([])
   const [mobileBanners, setMobileBanners] = useState([])
+  const [allBanners, setAllBanners] = useState([])
   const [homeSeoContent, setHomeSeoContent] = useState("")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -187,6 +189,47 @@ const Home = () => {
       ),
     [heroBanners, deviceType, activeCountryCode],
   )
+
+  // Dynamic Image Banner displayed immediately below the Promotional Section (Desktop & Mobile)
+  const promoImageBannerDesktop = useMemo(() => {
+    return (
+      allBanners.find(
+        (b) =>
+          b.isActive !== false &&
+          (b.position === "hero-desktop" ||
+            b.position === "second-banner-desktop" ||
+            (b.position === "hero" && (b.deviceType || "desktop").toLowerCase() === "desktop")) &&
+          isBannerVisibleInCountry(b, activeCountryCode),
+      ) ||
+      allBanners.find(
+        (b) =>
+          b.isActive !== false &&
+          (b.position === "hero" || b.position === "hero-desktop" || b.position === "second-banner-desktop") &&
+          isBannerVisibleInCountry(b, activeCountryCode),
+      ) ||
+      null
+    )
+  }, [allBanners, activeCountryCode])
+
+  const promoImageBannerMobile = useMemo(() => {
+    return (
+      allBanners.find(
+        (b) =>
+          b.isActive !== false &&
+          (b.position === "hero-mobile" ||
+            b.position === "second-banner-mobile" ||
+            (b.position === "hero" && (b.deviceType || "").toLowerCase() === "mobile")) &&
+          isBannerVisibleInCountry(b, activeCountryCode),
+      ) ||
+      allBanners.find(
+        (b) =>
+          b.isActive !== false &&
+          (b.position === "hero-mobile" || b.position === "second-banner-mobile") &&
+          isBannerVisibleInCountry(b, activeCountryCode),
+      ) ||
+      null
+    )
+  }, [allBanners, activeCountryCode])
   const homeBannersByKey = useMemo(() => {
     const normalize = (value) => String(value || "").trim().toLowerCase()
     const targetDevice = normalize(deviceType)
@@ -324,9 +367,11 @@ const Home = () => {
         let categoriesData = []
         let brandsData = []
         let heroData = []
+        let secondData = []
         let promotionalBanners = []
         let mobileData = []
         let homeBannersData = []
+        let allBannersData = []
         let settingsData = defaultSettings
         let sectionsData = []
         let featured = []
@@ -344,9 +389,20 @@ const Home = () => {
           brandsData = Array.isArray(homePayload.brands) ? homePayload.brands : []
           const bannerGroups = homePayload.banners || {}
           heroData = Array.isArray(bannerGroups.hero) ? bannerGroups.hero : []
+          secondData = Array.isArray(bannerGroups.second) ? bannerGroups.second : []
           promotionalBanners = Array.isArray(bannerGroups.promotional) ? bannerGroups.promotional : []
           mobileData = Array.isArray(bannerGroups.mobile) ? bannerGroups.mobile : []
           homeBannersData = Array.isArray(bannerGroups.home) ? bannerGroups.home : []
+          allBannersData = Array.isArray(bannerGroups.all) ? bannerGroups.all : []
+          if (allBannersData.length === 0) {
+            allBannersData = [
+              ...heroData,
+              ...secondData,
+              ...mobileData,
+              ...promotionalBanners,
+              ...homeBannersData,
+            ]
+          }
 
           // Only hydrate banners if homepage payload completely missed banners
           const needsBannerHydration = !homePayload.banners && heroData.length === 0
@@ -375,10 +431,22 @@ const Home = () => {
 
           categoriesData = categoriesResponse.data
           brandsData = brandsResponse.data
-          const bannersData = bannersResponse.data
+          const bannersData = Array.isArray(bannersResponse.data) ? bannersResponse.data : []
+          allBannersData = bannersData
           settingsData = settingsResponse.data
           sectionsData = sectionsResponse.data
-          heroData = bannersData.filter((banner) => banner.position === "hero")
+          heroData = bannersData.filter(
+            (banner) =>
+              banner.position === "hero" ||
+              banner.position === "hero-desktop" ||
+              banner.position === "hero-mobile",
+          )
+          secondData = bannersData.filter(
+            (banner) =>
+              banner.position === "second-banner-desktop" ||
+              banner.position === "second-banner-mobile" ||
+              banner.position === "second-banner",
+          )
           promotionalBanners = bannersData.filter((banner) => banner.position === "promotional")
           mobileData = bannersData.filter((banner) => banner.position === "mobile")
           homeBannersData = bannersData.filter(
@@ -496,8 +564,10 @@ const Home = () => {
         setCategories(leanValidCategories)
         setBanners(promotionalBanners)
         setHeroBanners(heroData)
+        setSecondBanners(secondData)
         setMobileBanners(mobileData)
         setHomeBanners(homeBannersData)
+        setAllBanners(allBannersData)
         setBrands(leanValidBrands)
         setSettings(settingsData)
         setHomeSections(sectionsData)
@@ -824,12 +894,14 @@ const Home = () => {
           </div>
         </div>
       )}
-      {/* Campaign block. Edit the copy here -- the component takes it all as props. */}
+      {/* Promotional text section */}
       <PromoBanner />
 
-      {/* Video hero. Swap the clip by dropping a new file at public/media/hero.mp4
-          (and a matching first-frame poster), or pass src/poster props. */}
-      <VideoHero />
+      {/* Dynamic image banner placed immediately below promotional text section */}
+      <VideoHero
+        desktopBanner={promoImageBannerDesktop}
+        mobileBanner={promoImageBannerMobile}
+      />
 
       {/* Featured rail. Renders nothing when no product is flagged featured. */}
       <FeaturedProducts />

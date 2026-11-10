@@ -138,7 +138,12 @@ router.get(
     })
 
     // Organize banners by position
-    const heroBanners = banners.filter(b => b.position === 'hero')
+    const heroBanners = banners.filter(
+      (b) => b.position === 'hero' || b.position === 'hero-desktop' || b.position === 'hero-mobile'
+    )
+    const secondBanners = banners.filter(
+      (b) => b.position === 'second-banner-desktop' || b.position === 'second-banner-mobile' || b.position === 'second-banner'
+    )
     const promotionalBanners = banners.filter(b => b.position === 'promotional')
     const mobileBanners = banners.filter(b => b.position === 'mobile')
     const homeBanners = banners.filter(
@@ -155,9 +160,11 @@ router.get(
         brands,
         banners: {
           hero: heroBanners,
+          second: secondBanners,
           promotional: promotionalBanners,
           mobile: mobileBanners,
           home: homeBanners,
+          all: banners,
         },
         homeSections,
         settings: settings || {},

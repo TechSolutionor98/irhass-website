@@ -170,10 +170,14 @@ router.post(
       createdBy: req.user._id,
     })
 
-    // Hero banners: prefer explicit link, fallback to buttonLink, then /shop.
-    if ((banner.position || "hero") === "hero") {
+    // Hero & Second banners: prefer explicit link, fallback to buttonLink, then /shop.
+    const isHeroOrSecond =
+      (banner.position || "hero") === "hero" ||
+      String(banner.position).startsWith("hero-") ||
+      String(banner.position).startsWith("second-banner")
+    if (isHeroOrSecond) {
       applyHeroLinkPolicy(banner)
-      debugBanners("Hero create: resolved link fields", {
+      debugBanners("Hero/Second create: resolved link fields", {
         bannerId: banner._id?.toString?.(),
         buttonLink: banner.buttonLink,
         link: banner.link,
@@ -258,9 +262,14 @@ router.put(
         banner.targetCountries = sanitizeTargetCountries(targetCountries)
       }
 
-      if (finalPosition === "hero") {
+      const isHeroOrSecond =
+        finalPosition === "hero" ||
+        String(finalPosition).startsWith("hero-") ||
+        String(finalPosition).startsWith("second-banner")
+
+      if (isHeroOrSecond) {
         applyHeroLinkPolicy(banner)
-        debugBanners("Hero update: resolved link fields", {
+        debugBanners("Hero/Second update: resolved link fields", {
           id: req.params.id,
           buttonLink: banner.buttonLink,
           link: banner.link,

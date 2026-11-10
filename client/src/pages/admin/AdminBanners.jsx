@@ -40,7 +40,7 @@ const AdminBanners = () => {
     image: "",
     buttonText: "Shop Now",
     buttonLink: "/shop",
-    position: "hero",
+    position: "hero-desktop",
     section: "", // Add section field
     link: "", // Add direct link field
     category: "",
@@ -54,7 +54,11 @@ const AdminBanners = () => {
   })
 
   const positions = [
-    { value: "hero", label: "Hero Section (Main Slider)" },
+    { value: "hero-desktop", label: "Hero Section Desktop" },
+    { value: "hero-mobile", label: "Hero Section Mobile" },
+    { value: "second-banner-desktop", label: "Second Banner Desktop" },
+    { value: "second-banner-mobile", label: "Second Banner Mobile" },
+    { value: "hero", label: "Hero Section (All Devices)" },
     // { value: "category", label: "Category Section" },
     // { value: "promotional", label: "Promotional Section" },
     // { value: "footer", label: "Footer Section" },
@@ -182,7 +186,11 @@ const AdminBanners = () => {
         category: formData.position === "category" ? formData.category : null,
       }
 
-      if (finalPosition === "hero") {
+      if (
+        finalPosition === "hero" ||
+        String(finalPosition).startsWith("hero-") ||
+        String(finalPosition).startsWith("second-banner-")
+      ) {
         const heroLink = String(formData.buttonLink || formData.link || "/shop").trim() || "/shop"
         bannerData.buttonLink = heroLink
         bannerData.link = heroLink
@@ -425,7 +433,16 @@ const AdminBanners = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Position</label>
                   <select
                     value={formData.position}
-                    onChange={(e) => setFormData({ ...formData, position: e.target.value })}
+                    onChange={(e) => {
+                      const pos = e.target.value
+                      let autoDevice = formData.deviceType
+                      if (pos === "hero-desktop" || pos === "second-banner-desktop") {
+                        autoDevice = "desktop"
+                      } else if (pos === "hero-mobile" || pos === "second-banner-mobile") {
+                        autoDevice = "mobile"
+                      }
+                      setFormData({ ...formData, position: pos, deviceType: autoDevice })
+                    }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   >
@@ -452,7 +469,10 @@ const AdminBanners = () => {
               </div>
 
               {/* Direct Link field for home page banners */}
-              {(formData.position === 'top-triple' || formData.position === 'top-mobile' || 
+              {(formData.position === 'hero-desktop' || formData.position === 'hero-mobile' ||
+                formData.position === 'second-banner-desktop' || formData.position === 'second-banner-mobile' ||
+                formData.position === 'hero' ||
+                formData.position === 'top-triple' || formData.position === 'top-mobile' || 
                 formData.position === 'hp-mobile' || formData.position === 'hp-dell-desktop' ||
                 formData.position === 'asus-mobile' || formData.position === 'acer-asus-desktop' ||
                 formData.position === 'accessories' || formData.position === 'msi-mobile' ||
