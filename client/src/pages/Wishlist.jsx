@@ -90,10 +90,15 @@ const Wishlist = () => {
                   </div>
 
                   {/* Price */}
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <div className="text-lg font-bold text-red-600">
                       {product.price ? formatCurrencyPrice(product.price, isArabic) : "Price not available"}
                     </div>
+                    {Number(product.buyingPrice) > 0 && (
+                      <div className="text-xs text-gray-400 line-through font-medium">
+                        {formatCurrencyPrice(Number(product.buyingPrice), isArabic)}
+                      </div>
+                    )}
                   </div>
                 </Link>
 

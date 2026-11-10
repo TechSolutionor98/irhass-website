@@ -325,7 +325,9 @@ const CartDrawer = () => {
                     {recommendations.map((product) => {
                       const base = Number(product.price) || 0
                       const offer = Number(product.offerPrice) || 0
+                      const buying = Number(product.buyingPrice) || 0
                       const shown = offer > 0 && offer < base ? offer : base
+                      const crossedPrice = buying > 0 ? buying : (offer > 0 && offer < base ? base : 0)
 
                       return (
                         <div key={product._id} className="flex w-full flex-shrink-0 snap-start gap-4">
@@ -352,7 +354,12 @@ const CartDrawer = () => {
                                 <TranslatedText text={product.name}>{product.name}</TranslatedText>
                               </p>
                             </Link>
-                            <p className="mt-1 text-sm text-stone-900">{formatPrice(shown)}</p>
+                            <p className="mt-1 flex items-baseline gap-2 text-sm">
+                              <span className="text-stone-900">{formatPrice(shown)}</span>
+                              {crossedPrice > 0 && (
+                                <span className="text-xs text-stone-400 line-through">{formatPrice(crossedPrice)}</span>
+                              )}
+                            </p>
                             <button
                               type="button"
                               onClick={() => addToCart(product, 1)}

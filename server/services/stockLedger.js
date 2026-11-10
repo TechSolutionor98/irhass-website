@@ -1,5 +1,6 @@
 import Product from "../models/productModel.js"
 import StockMovement from "../models/stockMovementModel.js"
+import cacheService from "./cacheService.js"
 
 /**
  * Posting to the stock ledger.
@@ -81,6 +82,12 @@ export const postMovement = async ({
       await prodDoc.save()
     }
 
+    try {
+      await cacheService.invalidateEntity("products")
+    } catch (cacheErr) {
+      console.error("[STOCK] Cache invalidation failed:", cacheErr.message)
+    }
+
     return await StockMovement.create({
       product,
       type,
@@ -111,6 +118,11 @@ export const postOrderOut = async (order) => {
       selectedSizeIndex: item.selectedSizeIndex ?? null,
     })
   }
+  try {
+    await cacheService.invalidateEntity("products")
+  } catch (cacheErr) {
+    console.error("[STOCK] Cache invalidation failed:", cacheErr.message)
+  }
 }
 
 /**
@@ -140,6 +152,11 @@ export const postOrderReturn = async (order) => {
       selectedSizeData: item.selectedSizeData || null,
       selectedSizeIndex: item.selectedSizeIndex ?? null,
     })
+  }
+  try {
+    await cacheService.invalidateEntity("products")
+  } catch (cacheErr) {
+    console.error("[STOCK] Cache invalidation failed:", cacheErr.message)
   }
 }
 

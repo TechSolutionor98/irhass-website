@@ -5,6 +5,8 @@ import WhatsAppSettings from "../models/whatsappSettingsModel.js"
 import WhatsAppConversation from "../models/whatsappConversationModel.js"
 import WhatsAppMessage from "../models/whatsappMessageModel.js"
 import Order from "../models/orderModel.js"
+import { sendOrderStatusUpdateEmail } from "../utils/emailService.js"
+import { postOrderReturn } from "../services/stockLedger.js"
 import {
   sendText,
   sendTemplate,
@@ -142,8 +144,20 @@ const handleOrderButton = async (conversation, payload) => {
   const movable = ["Pending", "New", "Received", "Confirmed"]
   if (!movable.includes(order.status)) return
 
+  const oldStatus = order.status
   order.status = action === "confirm" ? "Confirmed" : "Cancelled"
   await order.save()
+
+  if (oldStatus !== order.status) {
+    sendOrderStatusUpdateEmail(order).catch((err) =>
+      console.error("[WHATSAPP] Failed to send status update email:", err.message),
+    )
+    if (order.status === "Cancelled") {
+      postOrderReturn(order).catch((err) =>
+        console.error("[WHATSAPP] Failed to restore stock:", err.message),
+      )
+    }
+  }
 
   await WhatsAppMessage.create({
     conversation: conversation._id,

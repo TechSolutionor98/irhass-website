@@ -1,10 +1,16 @@
-import "dotenv/config"
-import express from "express"
-import cors from "cors"
-import compression from "compression"
 import dotenv from "dotenv"
 import path from "path"
 import { fileURLToPath } from "url"
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+dotenv.config({ path: path.join(__dirname, ".env"), override: true })
+dotenv.config({ override: false })
+
+import express from "express"
+import cors from "cors"
+import compression from "compression"
 import fs from "fs"
 import sharp from "sharp"
 import connectDB, { connectBlogDB } from "./config/db.js"
@@ -14,9 +20,7 @@ import cacheService from "./services/cacheService.js"
 import { attachCacheService, autoInvalidateAllCacheOnMutation } from "./middleware/cacheMiddleware.js"
 import publicCache from "./middleware/publicCacheMiddleware.js"
 
-// Get __dirname equivalent in ES modules
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+
 
 import googleMerchantRoutes from "./routes/googleMerchantRoutes.js"
 import acerProductsRoutes from "./routes/acerProductsRoutes.js"
@@ -127,7 +131,7 @@ app.use(cors({
     'http://localhost:3000'
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-SEO-Unlock-Token', 'X-SEO-Settings-Unlock'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-SEO-Unlock-Token', 'X-SEO-Settings-Unlock', 'Cache-Control', 'Pragma', 'X-Requested-With'],
   exposedHeaders: ['WWW-Authenticate', 'Server-Authorization'],
   maxAge: 86400,
   credentials: true,
@@ -136,7 +140,7 @@ app.use(cors({
 
 app.options("*", (req, res) => {
   res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, Origin, X-SEO-Unlock-Token, X-SEO-Settings-Unlock");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, Origin, X-SEO-Unlock-Token, X-SEO-Settings-Unlock, Cache-Control, Pragma, X-Requested-With");
   res.send();
 });
 

@@ -106,7 +106,7 @@ export const productsAPI = {
     return apiRequest(`/api/products${queryString ? `?${queryString}` : ""}`)
   },
 
-  getById: (id) => apiRequest(`/api/products/${id}`),
+  getById: (id) => apiRequest(`/api/products/${id}?_t=${Date.now()}`),
 
   create: (productData) =>
     apiRequest("/api/products", {
@@ -129,7 +129,7 @@ export const productsAPI = {
 
   search: (query) => apiRequest(`/api/products/search?q=${encodeURIComponent(query)}`),
 
-  getBySlug: (slug) => apiRequest(`/api/products/slug/${encodeURIComponent(slug)}`),
+  getBySlug: (slug) => apiRequest(`/api/products/slug/${encodeURIComponent(slug)}?_t=${Date.now()}`),
   getBySku: (sku) => apiRequest(`/api/products?search=${encodeURIComponent(sku)}`),
   getBySkus: (skus) =>
     apiRequest(`/api/products/by-skus`, {

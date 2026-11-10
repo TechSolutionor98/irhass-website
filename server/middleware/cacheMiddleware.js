@@ -19,8 +19,10 @@ import cacheService, { cacheHelpers, CACHE_CONFIG } from '../services/cacheServi
 const createCacheKey = (req, prefix) => {
   const query = req.query ? JSON.stringify(req.query) : ''
   const params = req.params ? JSON.stringify(req.params) : ''
-  const key = `${prefix}:${req.originalUrl}:${query}:${params}`
-  return key.replace(/[{}":]/g, '_').replace(/\s/g, '')
+  const cleanUrl = req.originalUrl.replace(/[{}":\s]/g, '_')
+  const cleanQuery = query.replace(/[{}":\s]/g, '_')
+  const cleanParams = params.replace(/[{}":\s]/g, '_')
+  return `${prefix}:${cleanUrl}:${cleanQuery}:${cleanParams}`
 }
 
 /**

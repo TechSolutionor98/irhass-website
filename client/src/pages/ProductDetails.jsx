@@ -2576,12 +2576,20 @@ const ProductDetails = () => {
   const getDiscountBadge = () => {
     const basePrice = Number(product.price) || 0;
     const offerPrice = Number(product.offerPrice) || 0;
+    const buyingPrice = Number(product.buyingPrice) || 0;
     const hasValidOffer = offerPrice > 0 && basePrice > 0 && offerPrice < basePrice;
     // Unified badge style for discount
     const badgeClass =
       "inline-flex items-center justify-center px-3 py-[5px] text-[10px] font-semibold uppercase tracking-[0.12em] leading-none bg-brand-600 text-white";
     if (hasValidOffer) {
       const discountPercentage = Math.round(((basePrice - offerPrice) / basePrice) * 100);
+      return (
+        <span className={badgeClass}>
+          -{discountPercentage}%
+        </span>
+      );
+    } else if (buyingPrice > 0 && basePrice > 0 && buyingPrice > basePrice) {
+      const discountPercentage = Math.round(((buyingPrice - basePrice) / buyingPrice) * 100);
       return (
         <span className={badgeClass}>
           -{discountPercentage}%
@@ -2961,16 +2969,24 @@ const ProductDetails = () => {
               <div className="mt-3" itemProp="offers" itemScope itemType="https://schema.org/Offer">
                 {(() => {
                   const currentColor = getCurrentColor()
+                  const currentDos = getCurrentDos()
                   const currentSize = getCurrentSize()
                   let basePrice = 0
                   let offerPrice = 0
+                  let buyingPrice = 0
 
                   if (currentColor) {
                     basePrice = Number(currentColor.price) || 0
                     offerPrice = Number(currentColor.offerPrice) || 0
+                    buyingPrice = Number(currentColor.buyingPrice) || Number(product.buyingPrice) || 0
                   } else {
                     basePrice = Number(product.price) || 0
                     offerPrice = Number(product.offerPrice) || 0
+                    buyingPrice = Number(product.buyingPrice) || 0
+                  }
+
+                  if (currentDos && Number(currentDos.buyingPrice) > 0) {
+                    buyingPrice += Number(currentDos.buyingPrice)
                   }
 
                   const sizeAdditional = currentSize && Number(currentSize.additionalPrice) > 0 ? Number(currentSize.additionalPrice) : 0
@@ -2982,7 +2998,15 @@ const ProductDetails = () => {
                   const hasValidOffer = offerPrice > 0 && basePrice > 0 && offerPrice < basePrice
                   const priceToShow = getEffectivePrice()
                   const priceContent = toMerchantPriceContent(priceToShow)
-                  const discount = hasValidOffer ? Math.round(((basePrice - offerPrice) / basePrice) * 100) : 0
+
+                  // Crossed-out price: show actual Buying Price (strikethrough)
+                  const crossedPrice = buyingPrice > 0 ? buyingPrice : (hasValidOffer ? basePrice : 0)
+                  const showOldPrice = crossedPrice > 0
+                  const discount = hasValidOffer
+                    ? Math.round(((basePrice - offerPrice) / basePrice) * 100)
+                    : (buyingPrice > 0 && priceToShow > 0 && buyingPrice > priceToShow
+                      ? Math.round(((buyingPrice - priceToShow) / buyingPrice) * 100)
+                      : 0)
 
                   return (
                     <>
@@ -2995,18 +3019,18 @@ const ProductDetails = () => {
                       )}
                       <div className="flex flex-wrap items-baseline gap-3">
                         <span className="text-2xl font-semibold text-stone-900">{formatPrice(priceToShow)}</span>
-                        {hasValidOffer && (
-                          <span className="text-base font-normal text-stone-400 line-through">{formatPrice(basePrice)}</span>
+                        {showOldPrice && (
+                          <span className="text-base font-normal text-stone-400 line-through">{formatPrice(crossedPrice)}</span>
                         )}
-                        {hasValidOffer && discount > 0 && (
+                        {discount > 0 && (
                           <span className="bg-brand-600 px-2 py-[3px] text-[10px] font-semibold uppercase tracking-[0.12em] text-white">
                             {discount}% <TranslatedText>off</TranslatedText>
                           </span>
                         )}
                       </div>
-                      {hasValidOffer && (
+                      {crossedPrice > priceToShow && (
                         <p className="mt-1 text-sm text-brand-700">
-                          <TranslatedText>You Save</TranslatedText> {formatPrice(basePrice - priceToShow)}
+                          <TranslatedText>You Save</TranslatedText> {formatPrice(crossedPrice - priceToShow)}
                         </p>
                       )}
                       <LoyaltyEarnBadge product={product} priceAed={priceToShow} className="mt-3" />
@@ -3133,7 +3157,17 @@ const ProductDetails = () => {
                           isAvailable ? "text-emerald-700" : "text-red-600"
                         }`}
                       >
-                        <TranslatedText>Available in Stock</TranslatedText>: {availableQuantity}
+                        {isAvailable ? (
+                          <>
+                            <TranslatedText>Available in Stock</TranslatedText>: {availableQuantity}
+                            {currentSize ? ` (${currentSize.code || currentSize.name})` : ""}
+                          </>
+                        ) : (
+                          <>
+                            <TranslatedText>Out of Stock</TranslatedText>
+                            {currentSize ? ` (${currentSize.code || currentSize.name}: 0)` : ": 0"}
+                          </>
+                        )}
                       </span>
                     </div>
                   )
@@ -3257,9 +3291,16 @@ const ProductDetails = () => {
                             </p>
                             
                             {/* Price */}
-                            <p className="text-sm font-semibold text-center text-stone-900">
-                              {formatPrice(dosPrice)}
-                            </p>
+                            <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                              <p className="text-sm font-semibold text-center text-stone-900">
+                                {formatPrice(dosPrice)}
+                              </p>
+                              {Number(dosVar.buyingPrice) > 0 && (
+                                <p className="text-xs text-stone-400 line-through">
+                                  {formatPrice(Number(dosVar.buyingPrice))}
+                                </p>
+                              )}
+                            </div>
                             
                             {/* Current Selection Indicator */}
                             {isSelected && (
@@ -3390,6 +3431,7 @@ const ProductDetails = () => {
                         isCurrent: true,
                         image: product.image,
                         price: product.price,
+                        buyingPrice: product.buyingPrice,
                         offerPrice: product.offerPrice,
                         sku: product.sku
                       })
@@ -3421,6 +3463,7 @@ const ProductDetails = () => {
                           isCurrent: false,
                           image: typeof modelProduct === "object" ? modelProduct.image : null,
                           price: typeof modelProduct === "object" ? modelProduct.price : null,
+                          buyingPrice: typeof modelProduct === "object" ? modelProduct.buyingPrice : null,
                           offerPrice: typeof modelProduct === "object" ? modelProduct.offerPrice : null,
                           sku: typeof modelProduct === "object" ? modelProduct.sku : null
                         })
@@ -3457,9 +3500,16 @@ const ProductDetails = () => {
                                     </p>
                                     
                                     {/* Price */}
-                                    <p className="text-sm font-semibold text-center text-stone-900">
-                                      {formatPrice(modelPrice)}
-                                    </p>
+                                    <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                      <p className="text-sm font-semibold text-center text-stone-900">
+                                        {formatPrice(modelPrice)}
+                                      </p>
+                                      {Number(model.buyingPrice) > 0 && (
+                                        <p className="text-xs text-stone-400 line-through">
+                                          {formatPrice(Number(model.buyingPrice))}
+                                        </p>
+                                      )}
+                                    </div>
                                     
                                     {/* Selection Indicator */}
                                     <div className="absolute top-1 right-1 bg-stone-900 text-white rounded-full p-1">
@@ -3488,9 +3538,16 @@ const ProductDetails = () => {
                                     </p>
                                     
                                     {/* Price */}
-                                    <p className="text-sm font-semibold text-center text-stone-900">
-                                      {formatPrice(modelPrice)}
-                                    </p>
+                                    <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                      <p className="text-sm font-semibold text-center text-stone-900">
+                                        {formatPrice(modelPrice)}
+                                      </p>
+                                      {Number(model.buyingPrice) > 0 && (
+                                        <p className="text-xs text-stone-400 line-through">
+                                          {formatPrice(Number(model.buyingPrice))}
+                                        </p>
+                                      )}
+                                    </div>
                                   </Link>
                                 )}
                               </div>
@@ -4028,7 +4085,16 @@ const ProductDetails = () => {
                 .map((relatedProduct) => {
                   const base = Number(relatedProduct.price) || 0
                   const offer = Number(relatedProduct.offerPrice) || 0
+                  const buying = Number(relatedProduct.buyingPrice) || 0
                   const onOffer = offer > 0 && base > 0 && offer < base
+                  const sellingPrice = onOffer ? offer : base
+                  const crossedPrice = buying > 0 ? buying : (onOffer ? base : 0)
+                  const showCrossed = crossedPrice > 0
+                  const discountPct = onOffer
+                    ? Math.round(((base - offer) / base) * 100)
+                    : (buying > 0 && sellingPrice > 0 && buying > sellingPrice
+                      ? Math.round(((buying - sellingPrice) / buying) * 100)
+                      : 0)
 
                   return (
                     <Link
@@ -4043,9 +4109,9 @@ const ProductDetails = () => {
                           loading="lazy"
                           className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
                         />
-                        {onOffer && (
+                        {discountPct > 0 && (
                           <span className="absolute left-3 top-3 bg-brand-600 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-white">
-                            {Math.round(((base - offer) / base) * 100)}% <TranslatedText>off</TranslatedText>
+                            {discountPct}% <TranslatedText>off</TranslatedText>
                           </span>
                         )}
 
@@ -4072,8 +4138,8 @@ const ProductDetails = () => {
                         <TranslatedText text={relatedProduct.name}>{relatedProduct.name}</TranslatedText>
                       </h3>
                       <p className="mt-1 flex items-baseline gap-2 text-sm">
-                        <span className="font-semibold text-stone-900">{formatPrice(onOffer ? offer : base)}</span>
-                        {onOffer && <span className="text-xs text-stone-400 line-through">{formatPrice(base)}</span>}
+                        <span className="font-semibold text-stone-900">{formatPrice(sellingPrice)}</span>
+                        {showCrossed && <span className="text-xs text-stone-400 line-through">{formatPrice(crossedPrice)}</span>}
                       </p>
                     </Link>
                   )

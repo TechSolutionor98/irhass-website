@@ -129,7 +129,16 @@ const FeaturedProducts = ({ title = "Featured", limit = 12, viewAllHref = "/shop
             : products.map((product) => {
                 const base = Number(product.price) || 0
                 const offer = Number(product.offerPrice) || 0
+                const buying = Number(product.buyingPrice) || 0
                 const onOffer = offer > 0 && base > 0 && offer < base
+                const sellingPrice = onOffer ? offer : base
+                const crossedPrice = buying > 0 ? buying : (onOffer ? base : 0)
+                const showCrossed = crossedPrice > 0
+                const discountPct = onOffer
+                  ? Math.round(((base - offer) / base) * 100)
+                  : (buying > 0 && sellingPrice > 0 && buying > sellingPrice
+                    ? Math.round(((buying - sellingPrice) / buying) * 100)
+                    : 0)
                 // Both fields are used across the catalogue; either one can mark a
                 // product unavailable, and a quick-add that fails is worse than none.
                 const soldOut =
@@ -148,9 +157,9 @@ const FeaturedProducts = ({ title = "Featured", limit = 12, viewAllHref = "/shop
                         loading="lazy"
                         className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
                       />
-                      {onOffer && (
+                      {discountPct > 0 && (
                         <span className="absolute left-3 top-3 bg-brand-600 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-white">
-                          {Math.round(((base - offer) / base) * 100)}% <TranslatedText>off</TranslatedText>
+                          {discountPct}% <TranslatedText>off</TranslatedText>
                         </span>
                       )}
 
@@ -180,11 +189,11 @@ const FeaturedProducts = ({ title = "Featured", limit = 12, viewAllHref = "/shop
 
                     <p className="mt-1 flex items-baseline gap-2 text-sm">
                       <span className="font-semibold text-page-price">
-                        {formatPrice(onOffer ? offer : base, isArabic)}
+                        {formatPrice(sellingPrice, isArabic)}
                       </span>
-                      {onOffer && (
+                      {showCrossed && (
                         <span className="text-xs text-page-old-price line-through">
-                          {formatPrice(base, isArabic)}
+                          {formatPrice(crossedPrice, isArabic)}
                         </span>
                       )}
                     </p>

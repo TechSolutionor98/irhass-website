@@ -871,12 +871,12 @@ const DynamicBrandProductCard = ({ product }) => {
   // Use dynamic price
   const basePrice = Number(product.price) || 0
   const offerPrice = Number(product.offerPrice) || 0
+  const buyingPrice = Number(product.buyingPrice) || 0
 
   // Show offer price if it exists and is less than base price
   const hasValidOffer = offerPrice > 0 && basePrice > 0 && offerPrice < basePrice
-  const showOldPrice = hasValidOffer
 
-  // Determine which price to display
+  // Determine which price to display as main selling price (existing Base Price)
   let priceToShow = 0
   if (hasValidOffer) {
     priceToShow = offerPrice
@@ -886,10 +886,17 @@ const DynamicBrandProductCard = ({ product }) => {
     priceToShow = offerPrice
   }
 
-  // Fallback: compute discount % if not provided from admin and we have a valid offer
+  // Display Buying Price as crossed-out (strikethrough) price
+  const crossedPrice = buyingPrice > 0 ? buyingPrice : (hasValidOffer ? basePrice : 0)
+  const showOldPrice = crossedPrice > 0
+
+  // Fallback: compute discount % if not provided from admin and we have a valid offer or buyingPrice
   let computedDiscount = null
   if (!discount && hasValidOffer && basePrice > 0 && offerPrice > 0) {
     const pct = Math.round(((basePrice - offerPrice) / basePrice) * 100)
+    if (pct > 0) computedDiscount = `${pct}% Off`
+  } else if (!discount && buyingPrice > 0 && priceToShow > 0 && buyingPrice > priceToShow) {
+    const pct = Math.round(((buyingPrice - priceToShow) / buyingPrice) * 100)
     if (pct > 0) computedDiscount = `${pct}% Off`
   }
   const finalDiscountLabel = discount || computedDiscount
@@ -957,7 +964,7 @@ const DynamicBrandProductCard = ({ product }) => {
         </div>
         {showOldPrice && (
           <div className="text-gray-400 line-through text-xs font-medium">
-            {formatCurrencyPrice(basePrice, isArabic)}
+            {formatCurrencyPrice(crossedPrice, isArabic)}
           </div>
         )}
       </div>
@@ -1008,12 +1015,12 @@ const AccessoriesProductCard = ({ product }) => {
   // Use dynamic price
   const basePrice = Number(product.price) || 0
   const offerPrice = Number(product.offerPrice) || 0
+  const buyingPrice = Number(product.buyingPrice) || 0
 
   // Show offer price if it exists and is less than base price
   const hasValidOffer = offerPrice > 0 && basePrice > 0 && offerPrice < basePrice
-  const showOldPrice = hasValidOffer
 
-  // Determine which price to display
+  // Determine which price to display as main selling price (existing Base Price)
   let priceToShow = 0
   if (hasValidOffer) {
     priceToShow = offerPrice
@@ -1023,10 +1030,17 @@ const AccessoriesProductCard = ({ product }) => {
     priceToShow = offerPrice
   }
 
-  // Fallback: compute discount % if not provided from admin
+  // Display Buying Price as crossed-out (strikethrough) price
+  const crossedPrice = buyingPrice > 0 ? buyingPrice : (hasValidOffer ? basePrice : 0)
+  const showOldPrice = crossedPrice > 0
+
+  // Fallback: compute discount % if not provided from admin and we have a valid offer or buyingPrice
   let computedDiscount = null
   if (!discount && hasValidOffer && basePrice > 0 && offerPrice > 0) {
     const pct = Math.round(((basePrice - offerPrice) / basePrice) * 100)
+    if (pct > 0) computedDiscount = `${pct}% Off`
+  } else if (!discount && buyingPrice > 0 && priceToShow > 0 && buyingPrice > priceToShow) {
+    const pct = Math.round(((buyingPrice - priceToShow) / buyingPrice) * 100)
     if (pct > 0) computedDiscount = `${pct}% Off`
   }
   const finalDiscountLabel = discount || computedDiscount
@@ -1093,7 +1107,7 @@ const AccessoriesProductCard = ({ product }) => {
         </div>
         {showOldPrice && (
           <div className="text-gray-400 line-through text-xs font-medium">
-            {formatCurrencyPrice(basePrice, isArabic)}
+            {formatCurrencyPrice(crossedPrice, isArabic)}
           </div>
         )}
       </div>

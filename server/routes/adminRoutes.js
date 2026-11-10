@@ -1012,7 +1012,11 @@ import {
   sendTrackingUpdateEmail,
   sendOrderPlacedEmail,
   sendQuotationCreatedEmail,
+  sendOrderStatusUpdateEmail,
+  sendOrderPaymentConfirmationEmail,
 } from "../utils/emailService.js"
+import { postOrderReturn } from "../services/stockLedger.js"
+import { sendOrderStatusUpdate as sendWhatsAppStatusUpdate } from "../services/whatsappNotifications.js"
 import Review from "../models/reviewModel.js"
 import { logActivity } from "../middleware/permissionMiddleware.js"
 import { issueSeoUnlockToken, verifySeoUnlockPassword } from "../middleware/seoUnlockMiddleware.js"
@@ -1500,17 +1504,27 @@ router.put(
         await syncOrderReferralForStatus(updatedOrder._id, normalized)
       }
 
-      // The customer is only written to when an admin ticks the box. Staff move
-      // orders through these statuses for their own bookkeeping far more often
-      // than the customer needs telling, so silence is the default and the
-      // caller has to opt in.
-      if (previousStatus !== normalized && req.body.sendCustomerEmail === true) {
+      // Automatically send customer status update email whenever status changes,
+      // unless explicitly suppressed with sendCustomerEmail === false
+      if (previousStatus !== normalized && req.body.sendCustomerEmail !== false) {
         try {
-          await sendOrderNotification(updatedOrder)
+          await sendOrderStatusUpdateEmail(updatedOrder)
           console.log(`Order status update email sent for order ${updatedOrder._id}`)
         } catch (emailError) {
           console.error("Failed to send order status update email:", emailError)
           // Don't fail the order update if email fails
+        }
+
+        // WhatsApp notification
+        sendWhatsAppStatusUpdate(updatedOrder).catch((error) =>
+          console.error("[WHATSAPP] Status update failed:", error.message),
+        )
+
+        // Automatic size-based stock restoration when order is cancelled
+        if (String(normalized).toLowerCase().includes("cancel")) {
+          await postOrderReturn(updatedOrder).catch((error) =>
+            console.error("[STOCK] Could not restore cancelled order stock:", error.message),
+          )
         }
       }
 
@@ -1541,12 +1555,11 @@ router.put(
       order.trackingId = req.body.trackingId
       const updatedOrder = await order.save()
 
-      // Opt-in, like the status email above -- a corrected typo in a tracking
-      // number should not mail the customer again.
+      // Send tracking update notification when tracking ID is set or changed
       if (
         previousTrackingId !== req.body.trackingId &&
         req.body.trackingId &&
-        req.body.sendCustomerEmail === true
+        req.body.sendCustomerEmail !== false
       ) {
         try {
           await sendTrackingUpdateEmail(updatedOrder)
@@ -1581,6 +1594,7 @@ router.put(
         throw new Error("Quotation cannot be updated from order details endpoint")
       }
       const { paymentMethod, isPaid, notes, estimatedDelivery, cancelReason } = req.body
+      const wasPaid = order.isPaid
 
       if (paymentMethod) order.paymentMethod = paymentMethod
       if (isPaid !== undefined) {
@@ -1596,6 +1610,14 @@ router.put(
       if (cancelReason !== undefined) order.cancelReason = cancelReason
 
       const updatedOrder = await order.save()
+
+      // If order was marked as paid, send payment confirmation email automatically
+      if (!wasPaid && updatedOrder.isPaid) {
+        sendOrderPaymentConfirmationEmail(updatedOrder).catch((emailErr) =>
+          console.error("Failed to send payment confirmation email:", emailErr.message),
+        )
+      }
+
       res.json(updatedOrder)
     } else {
       res.status(404)
@@ -1654,6 +1676,7 @@ router.put(
       throw new Error("isPaid is required")
     }
 
+    const wasPaid = order.isPaid
     order.isPaid = Boolean(isPaid)
     order.paidAt = order.isPaid ? order.paidAt || new Date() : null
     if (req.body.paymentMethod) {
@@ -1661,6 +1684,14 @@ router.put(
     }
 
     const updatedOrder = await order.save()
+
+    // Send payment confirmation email when marked as paid
+    if (!wasPaid && updatedOrder.isPaid) {
+      sendOrderPaymentConfirmationEmail(updatedOrder).catch((emailErr) =>
+        console.error("Failed to send payment confirmation email:", emailErr.message),
+      )
+    }
+
     res.json(updatedOrder)
   }),
 )

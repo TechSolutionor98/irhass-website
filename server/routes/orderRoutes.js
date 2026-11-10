@@ -915,6 +915,50 @@ router.post(
       status: "New",
     })
 
+    // Concurrency & real-time stock safety check:
+    // Re-verify the latest database stock right before saving the order to prevent race conditions and overselling.
+    for (const item of verifiedOrderItems) {
+      const freshProduct = await Product.findById(item.product)
+      if (!freshProduct) {
+        res.status(400)
+        throw new Error(`Product ${item.name} is no longer available`)
+      }
+
+      if (freshProduct.sizes && Array.isArray(freshProduct.sizes) && (item.selectedSizeData || (item.selectedSizeIndex !== null && item.selectedSizeIndex !== undefined))) {
+        let sizeIdx = -1
+        if (item.selectedSizeData) {
+          sizeIdx = freshProduct.sizes.findIndex(
+            (s) =>
+              (item.selectedSizeData.sizeId && String(s.size || s._id) === String(item.selectedSizeData.sizeId)) ||
+              (item.selectedSizeData.code && s.code && s.code.toLowerCase() === String(item.selectedSizeData.code).toLowerCase()) ||
+              (item.selectedSizeData.name && s.name && s.name.toLowerCase() === String(item.selectedSizeData.name).toLowerCase()),
+          )
+        }
+        if (sizeIdx === -1 && item.selectedSizeIndex !== null && item.selectedSizeIndex !== undefined && freshProduct.sizes[item.selectedSizeIndex]) {
+          sizeIdx = item.selectedSizeIndex
+        }
+
+        if (sizeIdx !== -1) {
+          const freshSize = freshProduct.sizes[sizeIdx]
+          const sizeStock = Number(freshSize.countInStock) || 0
+          if (sizeStock < item.quantity) {
+            const sizeLabel = freshSize.code || freshSize.name || ""
+            res.status(400)
+            throw new Error(
+              sizeStock <= 0
+                ? `${freshProduct.name} (${sizeLabel}) is out of stock`
+                : `Only ${sizeStock} items available for ${freshProduct.name} (${sizeLabel})`
+            )
+          }
+        }
+      } else if (!item.selectedColorIndex && !item.selectedDosIndex && freshProduct.stockStatus !== "PreOrder" && freshProduct.countInStock !== undefined && freshProduct.countInStock !== null) {
+        if ((Number(freshProduct.countInStock) || 0) < item.quantity) {
+          res.status(400)
+          throw new Error(`Only ${freshProduct.countInStock} items available for ${freshProduct.name}`)
+        }
+      }
+    }
+
     let createdOrder
     try {
       createdOrder = await order.save()

@@ -25,6 +25,15 @@ const PUBLIC_CACHE = [
 export const publicCache = (req, res, next) => {
   if (req.method !== "GET") return next()
 
+  // Real-time product details must never be cached at the edge or browser
+  if (
+    req.originalUrl.includes("/api/products/slug/") ||
+    req.originalUrl.match(/\/api\/products\/[a-f0-9]{24}(\?|$)/i)
+  ) {
+    res.set("Cache-Control", "no-cache, no-store, must-revalidate")
+    return next()
+  }
+
   // A signed-in request may carry details meant for that person only.
   if (req.headers.authorization || req.user) {
     res.set("Cache-Control", "private, no-store")

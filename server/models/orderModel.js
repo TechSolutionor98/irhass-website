@@ -403,6 +403,10 @@ const orderSchema = mongoose.Schema(
     metaPurchaseSentAt: {
       type: Date,
     },
+    // Set once the payment confirmation email has been sent to avoid duplicate emails
+    paymentEmailSentAt: {
+      type: Date,
+    },
   },
   {
     timestamps: true,

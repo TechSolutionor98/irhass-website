@@ -1257,7 +1257,7 @@ router.get(
 
     let productsQuery = Product.find(query)
       .select(
-        "name nameAr slug sku price offerPrice discount image countInStock stockStatus stockStatusAr brand category subCategory parentCategory subCategory2 subCategory3 subCategory4 featured tags createdAt rating numReviews targetCountries countryStock",
+        "name nameAr slug sku price buyingPrice offerPrice discount image countInStock stockStatus stockStatusAr brand category subCategory parentCategory subCategory2 subCategory3 subCategory4 featured tags createdAt rating numReviews targetCountries countryStock",
       )
       .populate("brand", "name nameAr slug")
       .populate("series", "name optionType")
@@ -1300,7 +1300,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const products = await Product.find({ isActive: true, hideFromShop: { $ne: true } })
       .select(
-        "name slug sku price basePrice offerPrice discount image galleryImages featured rating numReviews countInStock stockStatus brand parentCategory category subCategory subCategory2 subCategory3 subCategory4 parentCategoryName parentCategorySlug categoryName categorySlug subCategory2Name subCategory2Slug subCategory3Name subCategory3Slug subCategory4Name subCategory4Slug series model make manufacturer soldBy createdAt updatedAt targetCountries countryStock",
+        "name slug sku price buyingPrice basePrice offerPrice discount image galleryImages featured rating numReviews countInStock stockStatus brand parentCategory category subCategory subCategory2 subCategory3 subCategory4 parentCategoryName parentCategorySlug categoryName categorySlug subCategory2Name subCategory2Slug subCategory3Name subCategory3Slug subCategory4Name subCategory4Slug series model make manufacturer soldBy createdAt updatedAt targetCountries countryStock",
       )
       .populate("brand", "name slug")
       .lean()
@@ -1313,7 +1313,7 @@ router.get(
 // One field list for the shop grid, shared by the find() and aggregate() paths below so
 // the two can never return different shapes.
 const SHOP_QUERY_SELECT =
-  "name slug sku price basePrice offerPrice discount image galleryImages featured rating numReviews countInStock stockStatus brand parentCategory category subCategory subCategory2 subCategory3 subCategory4 parentCategoryName parentCategorySlug categoryName categorySlug subCategory2Name subCategory2Slug subCategory3Name subCategory3Slug subCategory4Name subCategory4Slug series model make manufacturer soldBy createdAt updatedAt"
+  "name slug sku price buyingPrice basePrice offerPrice discount image galleryImages featured rating numReviews countInStock stockStatus brand parentCategory category subCategory subCategory2 subCategory3 subCategory4 parentCategoryName parentCategorySlug categoryName categorySlug subCategory2Name subCategory2Slug subCategory3Name subCategory3Slug subCategory4Name subCategory4Slug series model make manufacturer soldBy createdAt updatedAt"
 const SHOP_QUERY_PROJECTION = SHOP_QUERY_SELECT.split(/\s+/).reduce((acc, field) => {
   acc[field] = 1
   return acc
@@ -1579,7 +1579,7 @@ router.get(
 
     const products = await Product.find(query)
       .select(
-        "name nameAr slug sku price offerPrice discount image countInStock stockStatus stockStatusAr brand category parentCategory featured tags createdAt rating numReviews",
+        "name nameAr slug sku price buyingPrice offerPrice discount image countInStock stockStatus stockStatusAr brand category parentCategory featured tags createdAt rating numReviews",
       )
       .populate("brand", "name nameAr slug")
       .populate("series", "name optionType")
@@ -1871,8 +1871,8 @@ router.put(
 // @access  Public
 router.get(
   "/:id",
-  cacheMiddleware("products"),
   asyncHandler(async (req, res) => {
+    res.set("Cache-Control", "no-cache, no-store, must-revalidate")
     const product = await Product.findById(req.params.id)
       .populate("category", "name nameAr slug")
       .populate("brand", "name nameAr")
@@ -1896,8 +1896,8 @@ router.get(
 // @access  Public
 router.get(
   "/slug/:slug",
-  cacheMiddleware("products"),
   asyncHandler(async (req, res) => {
+    res.set("Cache-Control", "no-cache, no-store, must-revalidate")
     const rawSlug = typeof req.params.slug === "string" ? req.params.slug : ""
     let decodedSlug = rawSlug
     try {
@@ -1929,13 +1929,13 @@ router.get(
       .populate("soldBy", "name optionType")
       .populate({
         path: "variations.product",
-        select: "name nameAr slug image price offerPrice sku isActive hideFromShop selfVariationText selfVariationTextAr reverseVariationText reverseVariationTextAr",
+        select: "name nameAr slug image price buyingPrice offerPrice sku isActive hideFromShop selfVariationText selfVariationTextAr reverseVariationText reverseVariationTextAr",
         // Populate all variation products regardless of hideFromShop status
         // This ensures hidden variations are visible in the variations section
       })
       .populate({
         path: "availableModels.product",
-        select: "name nameAr slug image price offerPrice sku isActive hideFromShop selfAvailableModelText selfAvailableModelTextAr",
+        select: "name nameAr slug image price buyingPrice offerPrice sku isActive hideFromShop selfAvailableModelText selfAvailableModelTextAr",
       })
 
     if (product) {

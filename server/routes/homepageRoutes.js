@@ -79,7 +79,7 @@ router.get(
         hideFromShop: { $ne: true }
       })
         .select(
-          'name nameAr slug sku price offerPrice discount image stockStatus stockStatusAr countInStock brand category subCategory parentCategory subCategory2 subCategory3 subCategory4 rating numReviews',
+          'name nameAr slug sku price buyingPrice offerPrice discount image stockStatus stockStatusAr countInStock brand category subCategory parentCategory subCategory2 subCategory3 subCategory4 rating numReviews',
         )
         .populate('brand', 'name nameAr slug')
         .populate('category', 'name nameAr slug')
@@ -115,7 +115,7 @@ router.get(
         brand: brandId
       })
         .select(
-          'name nameAr slug sku price offerPrice discount image stockStatus stockStatusAr countInStock brand category subCategory parentCategory subCategory2 subCategory3 subCategory4 rating numReviews',
+          'name nameAr slug sku price buyingPrice offerPrice discount image stockStatus stockStatusAr countInStock brand category subCategory parentCategory subCategory2 subCategory3 subCategory4 rating numReviews',
         )
         .populate('brand', 'name nameAr slug')
         .populate('category', 'name nameAr slug')
@@ -195,7 +195,7 @@ router.get(
     const [products, total] = await Promise.all([
       Product.find(query)
         .select(
-          'name nameAr slug sku price offerPrice discount image stockStatus stockStatusAr countInStock brand category subCategory parentCategory subCategory2 subCategory3 subCategory4 rating numReviews',
+          'name nameAr slug sku price buyingPrice offerPrice discount image stockStatus stockStatusAr countInStock brand category subCategory parentCategory subCategory2 subCategory3 subCategory4 rating numReviews',
         )
         .populate('brand', 'name nameAr slug')
         .populate('category', 'name nameAr slug')

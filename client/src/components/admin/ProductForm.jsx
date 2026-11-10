@@ -462,7 +462,12 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
           galleryImages: product.galleryImages || [],
           video: product.video || "",
           videoGallery: product.videoGallery || [],
-          countInStock: product.countInStock || "",
+          countInStock:
+            product.sizes && Array.isArray(product.sizes) && product.sizes.length > 0
+              ? product.sizes.reduce((sum, s) => sum + (Number(s.countInStock) || 0), 0).toString()
+              : product.countInStock !== undefined && product.countInStock !== null
+                ? product.countInStock.toString()
+                : "",
           targetCountries: Array.isArray(product.targetCountries) && product.targetCountries.length > 0 ? product.targetCountries : ["ALL"],
           countryStock: (() => {
             const stockMap = { AE: 0, SA: 0, QA: 0, OM: 0, BH: 0, KW: 0 }
@@ -987,20 +992,38 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
       (s) => s.sizeId === sizeId || (s.code && s.code.toLowerCase() === sizeObj.code.toLowerCase())
     )
     if (isAlreadySelected) {
-      setSelectedProductSizes((prev) =>
-        prev.filter((s) => s.sizeId !== sizeId && s.code.toLowerCase() !== sizeObj.code.toLowerCase())
-      )
+      setSelectedProductSizes((prev) => {
+        const next = prev.filter((s) => s.sizeId !== sizeId && s.code.toLowerCase() !== sizeObj.code.toLowerCase())
+        if (next.length > 0) {
+          const totalStock = next.reduce((sum, s) => sum + (Number(s.countInStock) || 0), 0)
+          setFormData((f) => ({
+            ...f,
+            countInStock: totalStock.toString(),
+            stockStatus: totalStock > 0 ? (f.stockStatus === "PreOrder" ? "PreOrder" : "In Stock") : (f.stockStatus === "PreOrder" ? "PreOrder" : "Out of Stock"),
+          }))
+        }
+        return next
+      })
     } else {
-      setSelectedProductSizes((prev) => [
-        ...prev,
-        {
-          sizeId: sizeObj._id,
-          name: sizeObj.name,
-          code: sizeObj.code,
-          additionalPrice: 0,
-          countInStock: 0,
-        },
-      ])
+      setSelectedProductSizes((prev) => {
+        const next = [
+          ...prev,
+          {
+            sizeId: sizeObj._id,
+            name: sizeObj.name,
+            code: sizeObj.code,
+            additionalPrice: 0,
+            countInStock: 0,
+          },
+        ]
+        const totalStock = next.reduce((sum, s) => sum + (Number(s.countInStock) || 0), 0)
+        setFormData((f) => ({
+          ...f,
+          countInStock: totalStock.toString(),
+          stockStatus: totalStock > 0 ? (f.stockStatus === "PreOrder" ? "PreOrder" : "In Stock") : (f.stockStatus === "PreOrder" ? "PreOrder" : "Out of Stock"),
+        }))
+        return next
+      })
     }
   }
 
@@ -1013,13 +1036,31 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
 
   const handleSizeStockChange = (index, value) => {
     const numVal = value === "" ? "" : Math.max(0, Number.parseInt(value) || 0)
-    setSelectedProductSizes((prev) =>
-      prev.map((item, i) => (i === index ? { ...item, countInStock: numVal } : item))
-    )
+    setSelectedProductSizes((prev) => {
+      const next = prev.map((item, i) => (i === index ? { ...item, countInStock: numVal } : item))
+      const totalStock = next.reduce((sum, s) => sum + (Number(s.countInStock) || 0), 0)
+      setFormData((f) => ({
+        ...f,
+        countInStock: totalStock.toString(),
+        stockStatus: totalStock > 0 ? (f.stockStatus === "PreOrder" ? "PreOrder" : "In Stock") : (f.stockStatus === "PreOrder" ? "PreOrder" : "Out of Stock"),
+      }))
+      return next
+    })
   }
 
   const removeSelectedProductSize = (index) => {
-    setSelectedProductSizes((prev) => prev.filter((_, i) => i !== index))
+    setSelectedProductSizes((prev) => {
+      const next = prev.filter((_, i) => i !== index)
+      if (next.length > 0) {
+        const totalStock = next.reduce((sum, s) => sum + (Number(s.countInStock) || 0), 0)
+        setFormData((f) => ({
+          ...f,
+          countInStock: totalStock.toString(),
+          stockStatus: totalStock > 0 ? (f.stockStatus === "PreOrder" ? "PreOrder" : "In Stock") : (f.stockStatus === "PreOrder" ? "PreOrder" : "Out of Stock"),
+        }))
+      }
+      return next
+    })
   }
 
   const handleSubmit = async (e) => {
@@ -1066,7 +1107,10 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
         price: finalBasePrice, // Save as-is (tax-inclusive; no re-add)
         offerPrice: finalOfferPrice, // Save as-is (tax-inclusive; no re-add)
         discount: Number.parseFloat(formData.discount) || 0,
-        countInStock: Number.parseInt(formData.countInStock) || 0,
+        countInStock:
+          selectedProductSizes.length > 0
+            ? selectedProductSizes.reduce((sum, s) => sum + (Number(s.countInStock) || 0), 0)
+            : Number.parseInt(formData.countInStock) || 0,
         targetCountries: Array.isArray(formData.targetCountries) && formData.targetCountries.length > 0 ? formData.targetCountries : ["ALL"],
         countryStock: Object.entries(formData.countryStock || {}).map(([country, count]) => ({
           country: String(country).toUpperCase(),
@@ -1851,13 +1895,22 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Total Stock Quantity{!product && <span className="text-red-500">*</span>}
+              {selectedProductSizes.length > 0 && (
+                <span className="block text-xs font-normal text-amber-700">
+                  (Synced with Product Sizes section below)
+                </span>
+              )}
             </label>
             <input
               type="number"
               name="countInStock"
               value={formData.countInStock}
               onChange={handleInputChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 ${
+                selectedProductSizes.length > 0
+                  ? "border-amber-300 bg-amber-50/30 focus:ring-amber-500 font-semibold"
+                  : "border-gray-300 focus:ring-blue-500"
+              }`}
               placeholder="0"
               {...(!product ? { required: true } : {})}
             />
@@ -2526,6 +2579,44 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
             <div>
               <span className="text-xs bg-amber-100 text-amber-800 font-semibold px-3 py-1 rounded-full border border-amber-200">
                 {selectedProductSizes.length} {selectedProductSizes.length === 1 ? "Size" : "Sizes"} Selected
+              </span>
+            </div>
+          </div>
+
+          {/* Total Stock Quantity Management Inside Sizes Section */}
+          <div className="mb-5 bg-white p-4 rounded-lg border border-amber-300 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <label className="block text-sm font-bold text-gray-900">
+                  Total Stock Quantity{!product && <span className="text-red-500">*</span>}
+                </label>
+                {selectedProductSizes.length > 0 && (
+                  <span className="text-xs bg-amber-100 text-amber-800 font-semibold px-2 py-0.5 rounded border border-amber-300">
+                    Auto-summed from sizes
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-gray-600 mt-1">
+                {selectedProductSizes.length > 0
+                  ? "Total product stock across all sizes. Updates automatically when you edit individual size quantities below."
+                  : "Total product stock quantity available for sale."}
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="w-40">
+                <input
+                  type="number"
+                  name="countInStock"
+                  min="0"
+                  value={formData.countInStock}
+                  onChange={handleInputChange}
+                  className="w-full px-3.5 py-2 text-base font-bold text-gray-900 bg-amber-50/50 border-2 border-amber-400 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-500 text-center"
+                  placeholder="0"
+                  {...(!product ? { required: true } : {})}
+                />
+              </div>
+              <span className="text-xs font-bold px-3 py-2 rounded bg-amber-100 text-amber-900 border border-amber-300 whitespace-nowrap">
+                Units Total
               </span>
             </div>
           </div>

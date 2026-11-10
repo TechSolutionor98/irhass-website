@@ -50,12 +50,12 @@ const ProductCard = ({ product, offerPageName }) => {
   const hasDiscount = product.discount && Number(product.discount) > 0
   const basePrice = Number(product.price) || 0
   const offerPrice = Number(product.offerPrice) || 0
+  const buyingPrice = Number(product.buyingPrice) || 0
 
   // Show offer price if it exists and is less than base price
   const hasValidOffer = offerPrice > 0 && basePrice > 0 && offerPrice < basePrice
-  const showOldPrice = hasValidOffer
 
-  // Determine which price to display
+  // Determine which price to display as main selling price (existing Base Price)
   let priceToShow = 0
   if (hasValidOffer) {
     priceToShow = offerPrice
@@ -64,6 +64,10 @@ const ProductCard = ({ product, offerPageName }) => {
   } else if (offerPrice > 0) {
     priceToShow = offerPrice
   }
+
+  // Display Buying Price as crossed-out (strikethrough) price
+  const crossedPrice = buyingPrice > 0 ? buyingPrice : (hasValidOffer ? basePrice : 0)
+  const showOldPrice = crossedPrice > 0
 
   // Fix rating and reviews display
   const rating = Number(product.rating) || 0
@@ -75,6 +79,9 @@ const ProductCard = ({ product, offerPageName }) => {
     finalDiscountLabel = `${Number(product.discount)}% Off`
   } else if (hasValidOffer && basePrice > 0 && offerPrice > 0) {
     const pct = Math.round(((basePrice - offerPrice) / basePrice) * 100)
+    if (pct > 0) finalDiscountLabel = `${pct}% Off`
+  } else if (buyingPrice > 0 && priceToShow > 0 && buyingPrice > priceToShow) {
+    const pct = Math.round(((buyingPrice - priceToShow) / buyingPrice) * 100)
     if (pct > 0) finalDiscountLabel = `${pct}% Off`
   }
   
@@ -156,7 +163,7 @@ const ProductCard = ({ product, offerPageName }) => {
         </div>
         {showOldPrice && (
           <div className="text-page-old-price line-through text-xs font-medium">
-            {formatPrice(basePrice)}
+            {formatPrice(crossedPrice)}
           </div>
         )}
       </div>

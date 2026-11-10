@@ -26,8 +26,19 @@ const ProductTile = ({ product }) => {
   const isArabic = currentLanguage?.code === "ar"
   const base = Number(product.price) || 0
   const offer = Number(product.offerPrice) || 0
+  const buying = Number(product.buyingPrice) || 0
   const onOffer = offer > 0 && base > 0 && offer < base
   const soldOut = product.stockStatus === "Out of Stock" || Number(product.countInStock) === 0
+
+  const sellingPrice = onOffer ? offer : base
+  const crossedPrice = buying > 0 ? buying : (onOffer ? base : 0)
+  const showCrossed = crossedPrice > 0
+
+  const discountPct = onOffer
+    ? Math.round(((base - offer) / base) * 100)
+    : (buying > 0 && sellingPrice > 0 && buying > sellingPrice
+      ? Math.round(((buying - sellingPrice) / buying) * 100)
+      : 0)
 
   return (
     <Link
@@ -41,9 +52,9 @@ const ProductTile = ({ product }) => {
           loading="lazy"
           className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
         />
-        {onOffer && (
+        {discountPct > 0 && (
           <span className="absolute left-2 top-2 bg-brand-600 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-white">
-            {Math.round(((base - offer) / base) * 100)}% <TranslatedText>off</TranslatedText>
+            {discountPct}% <TranslatedText>off</TranslatedText>
           </span>
         )}
 
@@ -70,8 +81,8 @@ const ProductTile = ({ product }) => {
         {product.name}
       </h3>
       <p className="mt-1 flex flex-wrap items-baseline gap-x-2 text-xs sm:text-sm">
-        <span className="font-semibold text-stone-900">{formatPrice(onOffer ? offer : base, isArabic)}</span>
-        {onOffer && <span className="text-[11px] text-stone-400 line-through">{formatPrice(base, isArabic)}</span>}
+        <span className="font-semibold text-stone-900">{formatPrice(sellingPrice, isArabic)}</span>
+        {showCrossed && <span className="text-[11px] text-stone-400 line-through">{formatPrice(crossedPrice, isArabic)}</span>}
       </p>
     </Link>
   )

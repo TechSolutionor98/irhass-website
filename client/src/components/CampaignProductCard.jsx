@@ -155,12 +155,12 @@ const CampaignProductCard = ({ product }) => {
   const stockStatus = product.stockStatus || (product.countInStock > 0 ? "Available" : "Out of Stock")
   const basePrice = Number(product.price) || 0
   const offerPrice = Number(product.offerPrice) || 0
+  const buyingPrice = Number(product.buyingPrice) || 0
 
   // Show offer price if it exists and is less than base price
   const hasValidOffer = offerPrice > 0 && basePrice > 0 && offerPrice < basePrice
-  const showOldPrice = hasValidOffer
 
-  // Determine which price to display
+  // Determine which price to display as main selling price (existing Base Price)
   let priceToShow = 0
   if (hasValidOffer) {
     priceToShow = offerPrice
@@ -168,6 +168,19 @@ const CampaignProductCard = ({ product }) => {
     priceToShow = basePrice
   } else if (offerPrice > 0) {
     priceToShow = offerPrice
+  }
+
+  // Display Buying Price as crossed-out (strikethrough) price
+  const crossedPrice = buyingPrice > 0 ? buyingPrice : (hasValidOffer ? basePrice : 0)
+  const showOldPrice = crossedPrice > 0
+
+  let finalDiscount = discount
+  if (!finalDiscount && hasValidOffer && basePrice > 0 && offerPrice > 0) {
+    const pct = Math.round(((basePrice - offerPrice) / basePrice) * 100)
+    if (pct > 0) finalDiscount = `${pct}% Off`
+  } else if (!finalDiscount && buyingPrice > 0 && priceToShow > 0 && buyingPrice > priceToShow) {
+    const pct = Math.round(((buyingPrice - priceToShow) / buyingPrice) * 100)
+    if (pct > 0) finalDiscount = `${pct}% Off`
   }
 
   // Fix rating and reviews display
@@ -206,8 +219,8 @@ const CampaignProductCard = ({ product }) => {
         <div className={`${getStatusColor(stockStatus)} text-white px-1 py-0.5 rounded text-xs  inline-block mr-1`}>
           <TranslatedText text={stockStatus} sourceDoc={product} fieldName="stockStatus" />
         </div>
-        {discount && (
-          <div className="bg-yellow-400 text-white px-1 py-0.5 rounded text-xs  inline-block">{discount}</div>
+        {finalDiscount && (
+          <div className="bg-yellow-400 text-white px-1 py-0.5 rounded text-xs  inline-block">{finalDiscount}</div>
         )}
       </div>
   <Link to={getLocalizedPath(`/product/${encodeURIComponent(product.slug || product._id)}`)}>
@@ -231,7 +244,7 @@ const CampaignProductCard = ({ product }) => {
         </div>
         {showOldPrice && (
           <div className="text-gray-400 line-through text-xs font-medium">
-            {formatCurrencyPrice(basePrice, isArabic)}
+            {formatCurrencyPrice(crossedPrice, isArabic)}
           </div>
         )}
       </div>

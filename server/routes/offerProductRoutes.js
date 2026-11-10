@@ -10,6 +10,7 @@ const OFFER_PRODUCT_SELECT = [
   'slug',
   'sku',
   'price',
+  'buyingPrice',
   'offerPrice',
   'discount',
   'oldPrice',

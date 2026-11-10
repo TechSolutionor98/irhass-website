@@ -932,20 +932,27 @@ import { sendMetaPurchase } from "../utils/metaConversions.js"
 import User from "../models/userModel.js"
 import { protect } from "../middleware/authMiddleware.js"
 import TamaraService from "../services/tamaraService.js"
+import { sendOrderPaymentConfirmationEmail } from "../utils/emailService.js"
 
 const router = express.Router()
 
-// Report a gateway-confirmed sale to Meta.
+// Report a gateway-confirmed sale to Meta and send payment confirmation email.
 //
 // Each gateway confirms twice -- once when the customer returns and once by
 // webhook -- and a webhook can be retried, so this runs on every path and
-// sendMetaPurchase keeps it to one event per order. Meta is never allowed to
-// affect the payment response.
+// sendMetaPurchase / paymentEmailSentAt keeps it to one event per order.
 const reportPurchase = async (order) => {
   try {
     await sendMetaPurchase(order, { Order })
   } catch (error) {
     console.error("Failed to report purchase to Meta:", error)
+  }
+  try {
+    if (order && order.isPaid) {
+      await sendOrderPaymentConfirmationEmail(order)
+    }
+  } catch (emailError) {
+    console.error("Failed to send payment confirmation email:", emailError.message)
   }
 }
 
@@ -1425,6 +1432,10 @@ router.post("/tamara/webhook", async (req, res) => {
       }
 
       await order.save()
+
+      if (isPaid) {
+        await reportPurchase(order)
+      }
 
       console.log("✅ Order updated successfully:", {
         orderId: order._id,

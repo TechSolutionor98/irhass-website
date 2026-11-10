@@ -214,7 +214,7 @@ const Checkout = () => {
         const responses = await Promise.all(
           uniqueProductIds.map(async (id) => {
             try {
-              const res = await axios.get(`${config.API_URL}/api/products/${id}`)
+              const res = await axios.get(`${config.API_URL}/api/products/${id}?_t=${Date.now()}`)
               return { id, product: res.data }
             } catch {
               return { id, product: null }

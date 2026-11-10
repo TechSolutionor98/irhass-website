@@ -388,7 +388,9 @@ class CacheService {
    * Invalidate cache for a specific entity type
    */
   async invalidateEntity(entityType) {
-    return this.invalidatePattern(`${entityType}:*`)
+    const countColon = await this.invalidatePattern(`${entityType}:*`)
+    const countUnderscore = await this.invalidatePattern(`${entityType}_*`)
+    return countColon + countUnderscore
   }
 
   /**
