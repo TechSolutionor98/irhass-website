@@ -6,29 +6,26 @@ import { useLanguage } from "../context/LanguageContext"
 import TranslatedText from "./TranslatedText"
 
 /**
- * Full-bleed video hero.
+ * Full-bleed video or graphic hero banner.
  *
- * Autoplay only works muted and with playsInline, and iOS additionally refuses to
- * start until the element is on screen -- so playback is driven by an IntersectionObserver
- * rather than the `autoplay` attribute. That also keeps the video from decoding while
- * scrolled past, which is the expensive part on a phone.
- *
- * The poster carries the first frame, so the section never flashes black while the
- * video downloads, and it is what a viewer sees if the file fails or motion is reduced.
+ * Supports both MP4/WebM video and static graphic banners (JPEG, PNG, WebP).
+ * When an image banner is used without overlay text, it renders cleanly at its
+ * natural 16:9 aspect ratio without cropping, distortion, or dark scrims,
+ * allowing pre-designed artwork and embedded CTAs to shine through.
  */
 const VideoHero = ({
-  src = "/media/hero.mp4",
-  poster = "/media/hero-poster.jpg",
-  heading = "The new season edit",
-  subheading = "Considered pieces, made to be worn",
-  ctas = [
-    { label: "Shop new in", href: "/shop" },
-    { label: "Shop abayas", href: "/shop/abayas-and-modest-wear" },
-  ],
+  src = "/media/hero-banner.jpg",
+  poster = "/media/hero-banner.jpg",
+  heading = "",
+  subheading = "",
+  ctas = [],
+  link = "/shop",
 }) => {
   const { getLocalizedPath } = useLanguage()
   const videoRef = useRef(null)
   const [reducedMotion, setReducedMotion] = useState(false)
+  const isVideo = Boolean(src && /\.(mp4|webm|ogg|mov)(\?.*)?$/i.test(src))
+  const hasOverlay = Boolean(heading || subheading || (ctas && ctas.length > 0))
 
   useEffect(() => {
     const query = window.matchMedia("(prefers-reduced-motion: reduce)")
@@ -39,6 +36,7 @@ const VideoHero = ({
   }, [])
 
   useEffect(() => {
+    if (!isVideo) return
     const video = videoRef.current
     if (!video || reducedMotion) return
 
@@ -56,29 +54,42 @@ const VideoHero = ({
     )
     observer.observe(video)
     return () => observer.disconnect()
-  }, [reducedMotion])
+  }, [reducedMotion, isVideo])
 
-  return (
-    <section className="relative w-full overflow-hidden bg-footer-bg" aria-label="Featured collection">
-      <div className="relative h-[60vh] min-h-[380px] w-full md:h-[72vh] md:min-h-[520px]">
-        <video
-          ref={videoRef}
-          className="absolute inset-0 h-full w-full object-cover"
-          poster={poster}
-          muted
-          loop
-          playsInline
-          preload="metadata"
-          aria-hidden="true"
-          tabIndex={-1}
-        >
-          <source src={src} type="video/mp4" />
-        </video>
+  const mediaElement = isVideo ? (
+    <video
+      ref={videoRef}
+      className="absolute inset-0 h-full w-full object-cover"
+      poster={poster}
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-hidden="true"
+      tabIndex={-1}
+    >
+      <source src={src} type="video/mp4" />
+    </video>
+  ) : (
+    <img
+      src={src || poster}
+      alt={typeof heading === "string" && heading ? heading : "Beauty Begins With Style"}
+      className="absolute inset-0 h-full w-full object-cover object-center"
+      loading="eager"
+      fetchPriority="high"
+    />
+  )
 
-        {/* Scrim. Without it the white type sits on whatever the footage happens to be
-            doing at that moment, which is never reliably readable. */}
+  const bannerInner = (
+    <div className={`relative w-full overflow-hidden ${hasOverlay ? "h-[60vh] min-h-[380px] md:h-[72vh] md:min-h-[520px]" : "aspect-video"}`}>
+      {mediaElement}
+
+      {/* Scrim. Only render if there is overlay text that requires contrast */}
+      {hasOverlay && (
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-black/10" />
+      )}
 
+      {hasOverlay && (
         <div className="relative flex h-full flex-col items-center justify-end px-4 pb-10 text-center md:pb-16">
           {heading && (
             <h2 className="max-w-3xl text-3xl font-semibold uppercase tracking-[0.06em] text-white drop-shadow-sm sm:text-4xl md:text-5xl">
@@ -105,7 +116,23 @@ const VideoHero = ({
             </div>
           )}
         </div>
-      </div>
+      )}
+    </div>
+  )
+
+  return (
+    <section className="relative w-full overflow-hidden bg-footer-bg" aria-label="Featured collection">
+      {!hasOverlay && link ? (
+        <Link
+          to={getLocalizedPath(link)}
+          className="block w-full cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand-600"
+          aria-label="Shop collection"
+        >
+          {bannerInner}
+        </Link>
+      ) : (
+        bannerInner
+      )}
     </section>
   )
 }
