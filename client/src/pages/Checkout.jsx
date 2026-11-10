@@ -2950,7 +2950,6 @@ const Checkout = () => {
         savedAddresses.some((a) => Boolean(String(a.phone || "").trim())))
   )
 
-  const hasSavedPayment = Boolean(selectedPaymentMethod)
   const hasSavedNotes = Boolean(String(customerNotes || "").trim())
 
   if (authLoading) {
@@ -3611,15 +3610,6 @@ const Checkout = () => {
                     </p>
                     <p className="mt-0.5 text-sm text-stone-900">{paymentSummary}</p>
                   </div>
-                  {hasSavedPayment && (
-                    <button
-                      type="button"
-                      onClick={() => goToSection("checkout-payment")}
-                      className="flex-shrink-0 text-xs font-semibold text-stone-900 underline underline-offset-4 hover:text-brand-700"
-                    >
-                      <TranslatedText>Edit</TranslatedText>
-                    </button>
-                  )}
                 </div>
 
                 <div className="flex items-start justify-between gap-3">
