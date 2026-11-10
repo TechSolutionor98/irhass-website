@@ -170,14 +170,16 @@ router.post(
       createdBy: req.user._id,
     })
 
-    // Hero & Second banners: prefer explicit link, fallback to buttonLink, then /shop.
-    const isHeroOrSecond =
-      (banner.position || "hero") === "hero" ||
+    // Dynamic home banners: prefer explicit link, fallback to buttonLink, then /shop.
+    const isDynamicHomeBanner =
+      (banner.position || "season-bottom") === "season-bottom" ||
+      banner.position === "sale-bottom" ||
+      banner.position === "hero" ||
       String(banner.position).startsWith("hero-") ||
       String(banner.position).startsWith("second-banner")
-    if (isHeroOrSecond) {
+    if (isDynamicHomeBanner) {
       applyHeroLinkPolicy(banner)
-      debugBanners("Hero/Second create: resolved link fields", {
+      debugBanners("Dynamic banner create: resolved link fields", {
         bannerId: banner._id?.toString?.(),
         buttonLink: banner.buttonLink,
         link: banner.link,
@@ -262,14 +264,16 @@ router.put(
         banner.targetCountries = sanitizeTargetCountries(targetCountries)
       }
 
-      const isHeroOrSecond =
+      const isDynamicHomeBanner =
+        finalPosition === "season-bottom" ||
+        finalPosition === "sale-bottom" ||
         finalPosition === "hero" ||
         String(finalPosition).startsWith("hero-") ||
         String(finalPosition).startsWith("second-banner")
 
-      if (isHeroOrSecond) {
+      if (isDynamicHomeBanner) {
         applyHeroLinkPolicy(banner)
-        debugBanners("Hero/Second update: resolved link fields", {
+        debugBanners("Dynamic banner update: resolved link fields", {
           id: req.params.id,
           buttonLink: banner.buttonLink,
           link: banner.link,

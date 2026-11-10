@@ -190,41 +190,78 @@ const Home = () => {
     [heroBanners, deviceType, activeCountryCode],
   )
 
-  // Dynamic Image Banner displayed immediately below the Promotional Section (Desktop & Mobile)
-  const promoImageBannerDesktop = useMemo(() => {
+  // Dynamic Image Banner displayed immediately below the Promotional Section ("25% Off New Season – Bottom Image")
+  const seasonBottomDesktopBanner = useMemo(() => {
     return (
       allBanners.find(
         (b) =>
           b.isActive !== false &&
-          (b.position === "hero-desktop" ||
-            b.position === "second-banner-desktop" ||
-            (b.position === "hero" && (b.deviceType || "desktop").toLowerCase() === "desktop")) &&
+          (b.position === "season-bottom" || b.position === "hero-desktop" || b.position === "hero") &&
+          (b.deviceType || "desktop").toLowerCase() === "desktop" &&
           isBannerVisibleInCountry(b, activeCountryCode),
       ) ||
       allBanners.find(
         (b) =>
           b.isActive !== false &&
-          (b.position === "hero" || b.position === "hero-desktop" || b.position === "second-banner-desktop") &&
+          (b.position === "season-bottom" || b.position === "hero-desktop" || b.position === "hero") &&
           isBannerVisibleInCountry(b, activeCountryCode),
       ) ||
       null
     )
   }, [allBanners, activeCountryCode])
 
-  const promoImageBannerMobile = useMemo(() => {
+  const seasonBottomMobileBanner = useMemo(() => {
     return (
       allBanners.find(
         (b) =>
           b.isActive !== false &&
-          (b.position === "hero-mobile" ||
-            b.position === "second-banner-mobile" ||
-            (b.position === "hero" && (b.deviceType || "").toLowerCase() === "mobile")) &&
+          (b.position === "season-bottom" || b.position === "hero-mobile" || b.position === "hero") &&
+          (b.deviceType || "").toLowerCase() === "mobile" &&
           isBannerVisibleInCountry(b, activeCountryCode),
       ) ||
       allBanners.find(
         (b) =>
           b.isActive !== false &&
-          (b.position === "hero-mobile" || b.position === "second-banner-mobile") &&
+          (b.position === "season-bottom" || b.position === "hero-mobile" || b.position === "hero") &&
+          isBannerVisibleInCountry(b, activeCountryCode),
+      ) ||
+      null
+    )
+  }, [allBanners, activeCountryCode])
+
+  // Dynamic Image Banner displayed for the Sale Section ("Sale Section – Bottom Image")
+  const saleBottomDesktopBanner = useMemo(() => {
+    return (
+      allBanners.find(
+        (b) =>
+          b.isActive !== false &&
+          (b.position === "sale-bottom" || b.position === "second-banner-desktop" || b.position === "second-banner") &&
+          (b.deviceType || "desktop").toLowerCase() === "desktop" &&
+          isBannerVisibleInCountry(b, activeCountryCode),
+      ) ||
+      allBanners.find(
+        (b) =>
+          b.isActive !== false &&
+          (b.position === "sale-bottom" || b.position === "second-banner-desktop" || b.position === "second-banner") &&
+          isBannerVisibleInCountry(b, activeCountryCode),
+      ) ||
+      null
+    )
+  }, [allBanners, activeCountryCode])
+
+  const saleBottomMobileBanner = useMemo(() => {
+    return (
+      allBanners.find(
+        (b) =>
+          b.isActive !== false &&
+          (b.position === "sale-bottom" || b.position === "second-banner-mobile" || b.position === "second-banner") &&
+          (b.deviceType || "").toLowerCase() === "mobile" &&
+          isBannerVisibleInCountry(b, activeCountryCode),
+      ) ||
+      allBanners.find(
+        (b) =>
+          b.isActive !== false &&
+          (b.position === "sale-bottom" || b.position === "second-banner-mobile" || b.position === "second-banner") &&
           isBannerVisibleInCountry(b, activeCountryCode),
       ) ||
       null
@@ -899,8 +936,8 @@ const Home = () => {
 
       {/* Dynamic image banner placed immediately below promotional text section */}
       <VideoHero
-        desktopBanner={promoImageBannerDesktop}
-        mobileBanner={promoImageBannerMobile}
+        desktopBanner={seasonBottomDesktopBanner}
+        mobileBanner={seasonBottomMobileBanner}
       />
 
       {/* Featured rail. Renders nothing when no product is flagged featured. */}
@@ -910,7 +947,10 @@ const Home = () => {
       <ProductGallery />
 
       {/* Campaign banner. Offer, image and both buttons are props -- edit them here. */}
-      <SaleBanner />
+      <SaleBanner
+        desktopBanner={saleBottomDesktopBanner}
+        mobileBanner={saleBottomMobileBanner}
+      />
 
       {/* Six products from each category, straight from the API. */}
       <CategoryShowcase />

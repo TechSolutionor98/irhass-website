@@ -3,15 +3,18 @@
 import { Link } from "react-router-dom"
 import { useLanguage } from "../context/LanguageContext"
 import TranslatedText from "./TranslatedText"
+import { getFullImageUrl } from "../utils/imageUtils"
 
 /**
  * Full-bleed campaign banner: one photograph, an offer, and two ways into the sale.
  *
  * Everything is a prop, so changing the season's offer is an edit to Home.jsx rather
  * than to this file. The image lives in public/media -- drop a replacement at the same
- * path, or pass `image`.
+ * path, or pass `image` / `desktopBanner` / `mobileBanner`.
  */
 const SaleBanner = ({
+  desktopBanner = null,
+  mobileBanner = null,
   image = "/media/sale-banner.jpg",
   eyebrow = "Sale",
   headline = "30%-50%",
@@ -23,6 +26,18 @@ const SaleBanner = ({
 }) => {
   const { getLocalizedPath } = useLanguage()
 
+  const desktopImage = desktopBanner?.image
+    ? getFullImageUrl(desktopBanner.image)
+    : mobileBanner?.image
+    ? getFullImageUrl(mobileBanner.image)
+    : image
+
+  const mobileImage = mobileBanner?.image
+    ? getFullImageUrl(mobileBanner.image)
+    : desktopBanner?.image
+    ? getFullImageUrl(desktopBanner.image)
+    : image
+
   // Breaks out of the 1360px content cap, like the gallery above it. Layout's <main>
   // carries `overflow-x: clip` so the viewport-width section cannot add a scrollbar.
   return (
@@ -31,13 +46,18 @@ const SaleBanner = ({
       className="relative left-1/2 mt-12 w-screen -translate-x-1/2 overflow-hidden md:mt-16"
     >
       <div className="relative h-[520px] w-full md:h-[560px]">
-        <img
-          src={image}
-          alt=""
-          aria-hidden="true"
-          loading="lazy"
-          className="absolute inset-0 h-full w-full object-cover"
-        />
+        <picture>
+          {mobileImage && (
+            <source media="(max-width: 767px)" srcSet={mobileImage} />
+          )}
+          <img
+            src={desktopImage || mobileImage}
+            alt=""
+            aria-hidden="true"
+            loading="lazy"
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+        </picture>
 
         {/* The type sits over whatever the photograph happens to be doing at that spot,
             so it gets its own scrim: a wash from the text side rather than a flat tint,

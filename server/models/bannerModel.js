@@ -31,6 +31,8 @@ const bannerSchema = mongoose.Schema(
       type: String,
       required: true,
       enum: [
+        "season-bottom",
+        "sale-bottom",
         "hero",
         "hero-desktop",
         "hero-mobile",
@@ -45,7 +47,7 @@ const bannerSchema = mongoose.Schema(
         "home-category-banner",
         "home-custom"
       ],
-      default: "hero",
+      default: "season-bottom",
     },
     section: {
       type: String,

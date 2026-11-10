@@ -40,7 +40,7 @@ const AdminBanners = () => {
     image: "",
     buttonText: "Shop Now",
     buttonLink: "/shop",
-    position: "hero-desktop",
+    position: "season-bottom",
     section: "", // Add section field
     link: "", // Add direct link field
     category: "",
@@ -54,29 +54,8 @@ const AdminBanners = () => {
   })
 
   const positions = [
-    { value: "hero-desktop", label: "Hero Section Desktop" },
-    { value: "hero-mobile", label: "Hero Section Mobile" },
-    { value: "second-banner-desktop", label: "Second Banner Desktop" },
-    { value: "second-banner-mobile", label: "Second Banner Mobile" },
-    { value: "hero", label: "Hero Section (All Devices)" },
-    // { value: "category", label: "Category Section" },
-    // { value: "promotional", label: "Promotional Section" },
-    // { value: "footer", label: "Footer Section" },
-    // Home Page Sections - Desktop
-    { value: "top-triple", label: "🏠 Top 3 Banners Section (Desktop)" },
-    { value: "hp-dell-desktop", label: "🏠 HP & Dell Section (Desktop)" },
-    { value: "acer-asus-desktop", label: "🏠 Acer & ASUS Section (Desktop)" },
-    { value: "msi-lenovo-desktop", label: "🏠 MSI & Lenovo Section (Desktop)" },
-    { value: "apple-samsung-desktop", label: "🏠 Apple & Samsung Section (Desktop)" },
-    // Home Page Sections - Mobile
-    { value: "top-mobile", label: "📱 Top 2 Banners Section (Mobile)" },
-    { value: "hp-mobile", label: "📱 HP Banner Section (Mobile)" },
-    { value: "asus-mobile", label: "📱 ASUS Banner Section (Mobile)" },
-    { value: "msi-mobile", label: "📱 MSI Banner Section (Mobile)" },
-    { value: "apple-mobile", label: "📱 Apple Banner Section (Mobile)" },
-    // Home Page Sections - Category Banners (Both)
-    { value: "accessories", label: "🏠 Accessories Section (Full Width)" },
-    { value: "networking", label: "🏠 Networking Section (Full Width)" },
+    { value: "season-bottom", label: "25% Off New Season – Bottom Image" },
+    { value: "sale-bottom", label: "Sale Section – Bottom Image" },
   ]
 
   useEffect(() => {
@@ -146,28 +125,8 @@ const AdminBanners = () => {
         title: formData.title,
       })
       
-      // Auto-map position to section and position for home banners
       let finalPosition = formData.position
-      let finalSection = formData.section
-      
-      // If position is one of the home sections, use it as section name
-      const homeSections = ['top-triple', 'top-mobile', 'hp-mobile', 'hp-dell-desktop', 'asus-mobile', 
-                           'acer-asus-desktop', 'accessories', 'msi-mobile', 'msi-lenovo-desktop', 
-                           'apple-mobile', 'apple-samsung-desktop', 'networking']
-      
-      if (homeSections.includes(formData.position)) {
-        finalSection = formData.position // Section name is the same as position
-        // Determine the position type based on the section
-        if (['top-triple', 'top-mobile'].includes(formData.position)) {
-          finalPosition = 'home-top-triple'
-        } else if (['hp-mobile', 'asus-mobile', 'msi-mobile', 'apple-mobile'].includes(formData.position)) {
-          finalPosition = 'home-brand-single'
-        } else if (['hp-dell-desktop', 'acer-asus-desktop', 'msi-lenovo-desktop', 'apple-samsung-desktop'].includes(formData.position)) {
-          finalPosition = 'home-brand-dual'
-        } else if (['accessories', 'networking'].includes(formData.position)) {
-          finalPosition = 'home-category-banner'
-        }
-      }
+      let finalSection = formData.section || formData.position
 
       debugBanners("submit:mappedPosition", {
         selectedPosition: formData.position,
@@ -187,6 +146,8 @@ const AdminBanners = () => {
       }
 
       if (
+        finalPosition === "season-bottom" ||
+        finalPosition === "sale-bottom" ||
         finalPosition === "hero" ||
         String(finalPosition).startsWith("hero-") ||
         String(finalPosition).startsWith("second-banner-")
@@ -259,7 +220,7 @@ const AdminBanners = () => {
       image: "",
       buttonText: "Shop Now",
       buttonLink: "/shop",
-      position: "hero",
+      position: "season-bottom",
       section: "",
       link: "",
       category: "",
@@ -286,15 +247,24 @@ const AdminBanners = () => {
       title: banner?.title,
       targetCountries: banner?.targetCountries,
     })
-    
-    // If banner has a section that matches one of our home sections, show that in position dropdown
+
     let displayPosition = banner.position
-    const homeSections = ['top-triple', 'top-mobile', 'hp-mobile', 'hp-dell-desktop', 'asus-mobile', 
-                         'acer-asus-desktop', 'accessories', 'msi-mobile', 'msi-lenovo-desktop', 
-                         'apple-mobile', 'apple-samsung-desktop', 'networking']
-    
-    if (banner.section && homeSections.includes(banner.section)) {
-      displayPosition = banner.section // Show section name in position dropdown
+    if (
+      displayPosition === "hero" ||
+      displayPosition === "hero-desktop" ||
+      displayPosition === "hero-mobile" ||
+      displayPosition?.includes("season")
+    ) {
+      displayPosition = "season-bottom"
+    } else if (
+      displayPosition === "second-banner" ||
+      displayPosition === "second-banner-desktop" ||
+      displayPosition === "second-banner-mobile" ||
+      displayPosition?.includes("sale")
+    ) {
+      displayPosition = "sale-bottom"
+    } else if (displayPosition !== "season-bottom" && displayPosition !== "sale-bottom") {
+      displayPosition = "season-bottom"
     }
     
     setFormData({
@@ -302,15 +272,15 @@ const AdminBanners = () => {
       subtitle: banner.subtitle || "",
       description: banner.description || "",
       image: banner.image,
-      buttonText: banner.buttonText,
-      buttonLink: banner.buttonLink,
+      buttonText: banner.buttonText || "Shop Now",
+      buttonLink: banner.buttonLink || "/shop",
       position: displayPosition,
-      section: banner.section || "",
-      link: banner.link || "",
+      section: banner.section || displayPosition,
+      link: banner.link || banner.buttonLink || "",
       category: banner.category?._id || "",
       discount: banner.discount || "",
-      isActive: banner.isActive,
-      sortOrder: banner.sortOrder,
+      isActive: banner.isActive !== undefined ? banner.isActive : true,
+      sortOrder: banner.sortOrder || 0,
       validFrom: banner.validFrom ? new Date(banner.validFrom).toISOString().split("T")[0] : "",
       validUntil: banner.validUntil ? new Date(banner.validUntil).toISOString().split("T")[0] : "",
       deviceType: banner.deviceType || "desktop",
@@ -433,16 +403,7 @@ const AdminBanners = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Position</label>
                   <select
                     value={formData.position}
-                    onChange={(e) => {
-                      const pos = e.target.value
-                      let autoDevice = formData.deviceType
-                      if (pos === "hero-desktop" || pos === "second-banner-desktop") {
-                        autoDevice = "desktop"
-                      } else if (pos === "hero-mobile" || pos === "second-banner-mobile") {
-                        autoDevice = "mobile"
-                      }
-                      setFormData({ ...formData, position: pos, deviceType: autoDevice })
-                    }}
+                    onChange={(e) => setFormData({ ...formData, position: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   >
@@ -468,32 +429,22 @@ const AdminBanners = () => {
                 </div>
               </div>
 
-              {/* Direct Link field for home page banners */}
-              {(formData.position === 'hero-desktop' || formData.position === 'hero-mobile' ||
-                formData.position === 'second-banner-desktop' || formData.position === 'second-banner-mobile' ||
-                formData.position === 'hero' ||
-                formData.position === 'top-triple' || formData.position === 'top-mobile' || 
-                formData.position === 'hp-mobile' || formData.position === 'hp-dell-desktop' ||
-                formData.position === 'asus-mobile' || formData.position === 'acer-asus-desktop' ||
-                formData.position === 'accessories' || formData.position === 'msi-mobile' ||
-                formData.position === 'msi-lenovo-desktop' || formData.position === 'apple-mobile' ||
-                formData.position === 'apple-samsung-desktop' || formData.position === 'networking') && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Direct Link <span className="text-gray-400">(Optional)</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.link}
-                    onChange={(e) => setFormData({ ...formData, link: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="product-category/accessories (without language prefix)"
-                  />
-                  <p className="mt-1 text-xs text-gray-500">
-                    Enter the path WITHOUT language prefix (ae-en/ae-ar). Examples: brand/hp, product-category/laptops, shop
-                  </p>
-                </div>
-              )}
+              {/* Direct Link field for banners */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Direct Link <span className="text-gray-400">(Optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={formData.link}
+                  onChange={(e) => setFormData({ ...formData, link: e.target.value, buttonLink: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="shop (without language prefix)"
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Enter the path WITHOUT language prefix. Examples: shop, shop/dresses, shop/abayas-and-modest-wear
+                </p>
+              </div>
 
               {formData.position === "category" && (
                 <div>
@@ -722,7 +673,10 @@ const AdminBanners = () => {
                               ? 'bg-blue-100 text-blue-800' 
                               : 'bg-orange-100 text-orange-800'
                           }`}>
-                            {positions.find((p) => p.value === banner.position)?.label || banner.position}
+                            {positions.find((p) => p.value === banner.position)?.label ||
+                              (banner.position?.includes("sale")
+                                ? "Sale Section – Bottom Image"
+                                : "25% Off New Season – Bottom Image")}
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
