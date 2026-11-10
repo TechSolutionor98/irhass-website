@@ -4,7 +4,7 @@ import { useState } from "react"
 import { Link } from "react-router-dom"
 import { Facebook, Instagram, Linkedin, ChevronRight } from "lucide-react"
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome"
-import { faPinterest, faTiktok, faYoutube } from "@fortawesome/free-brands-svg-icons"
+import { faTiktok, faYoutube, faXTwitter } from "@fortawesome/free-brands-svg-icons"
 import { useLanguage } from "../context/LanguageContext"
 import NewsletterModal from "./NewsletterModal"
 import TranslatedText from "./TranslatedText"
@@ -31,12 +31,12 @@ const LEGAL_LINKS = [
 ]
 
 const SOCIALS = [
-  { href: "https://www.instagram.com/irhaas/", label: "Instagram", Icon: Instagram },
-  { href: "https://www.facebook.com/irhaasae/", label: "Facebook", Icon: Facebook },
-  { href: "https://www.pinterest.com/irhaas/", label: "Pinterest", icon: faPinterest },
-  { href: "https://www.tiktok.com/@irhaas", label: "TikTok", icon: faTiktok },
-  { href: "https://www.youtube.com/@irhaas", label: "YouTube", icon: faYoutube },
-  { href: "https://www.linkedin.com/company/irhaasae", label: "LinkedIn", Icon: Linkedin },
+  { href: "https://facebook.com/irhaswardrobe/", label: "Facebook", Icon: Facebook },
+  { href: "https://instagram.com/irhaswardrob/", label: "Instagram", Icon: Instagram },
+  { href: "https://www.tiktok.com/@irhaswardrobe", label: "TikTok", icon: faTiktok },
+  { href: "https://linkedin.com/company/irhaswardrobe/", label: "LinkedIn", Icon: Linkedin },
+  { href: "https://x.com/irhaswardrobe", label: "X (Twitter)", icon: faXTwitter },
+  { href: "https://www.youtube.com/channel/UCRoX9oOzkqk2r0VlnG0SfXA", label: "YouTube", icon: faYoutube },
 ]
 
 const Footer = ({ className = "" }) => {

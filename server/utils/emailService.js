@@ -36,34 +36,34 @@ export const BRAND_ASSETS = {
   // Official verified social media channels for Irha's Wardrobe
   social: [
     {
-      name: "Instagram",
-      url: "https://www.instagram.com/irhaas/",
-      icon: "https://res.cloudinary.com/dyfhsu5v6/image/upload/v1794225719/irhaas-branding/social/instagram.png",
-    },
-    {
       name: "Facebook",
-      url: "https://www.facebook.com/irhaasae/",
+      url: "https://facebook.com/irhaswardrobe/",
       icon: "https://res.cloudinary.com/dyfhsu5v6/image/upload/v1794225721/irhaas-branding/social/facebook.png",
     },
     {
+      name: "Instagram",
+      url: "https://instagram.com/irhaswardrob/",
+      icon: "https://res.cloudinary.com/dyfhsu5v6/image/upload/v1794225719/irhaas-branding/social/instagram.png",
+    },
+    {
       name: "TikTok",
-      url: "https://www.tiktok.com/@irhaas",
+      url: "https://www.tiktok.com/@irhaswardrobe",
       icon: "https://res.cloudinary.com/dyfhsu5v6/image/upload/v1794225722/irhaas-branding/social/tiktok.png",
     },
     {
-      name: "Pinterest",
-      url: "https://www.pinterest.com/irhaas/",
-      icon: "https://res.cloudinary.com/dyfhsu5v6/image/upload/v1794225724/irhaas-branding/social/pinterest.png",
+      name: "LinkedIn",
+      url: "https://linkedin.com/company/irhaswardrobe/",
+      icon: "https://res.cloudinary.com/dyfhsu5v6/image/upload/v1794225723/irhaas-branding/social/linkedin.png",
+    },
+    {
+      name: "X (Twitter)",
+      url: "https://x.com/irhaswardrobe",
+      icon: "https://res.cloudinary.com/dyfhsu5v6/image/upload/v1794338603/irhaas-branding/social/x-twitter.png",
     },
     {
       name: "YouTube",
-      url: "https://www.youtube.com/@irhaas",
+      url: "https://www.youtube.com/channel/UCRoX9oOzkqk2r0VlnG0SfXA",
       icon: "https://res.cloudinary.com/dyfhsu5v6/image/upload/v1794225726/irhaas-branding/social/youtube.png",
-    },
-    {
-      name: "LinkedIn",
-      url: "https://www.linkedin.com/company/irhaasae",
-      icon: "https://res.cloudinary.com/dyfhsu5v6/image/upload/v1794225723/irhaas-branding/social/linkedin.png",
     },
   ],
 }

@@ -52,10 +52,12 @@ const settingsSchema = mongoose.Schema(
       default: "+92 321 498 0835",
     },
     socialMedia: {
-      facebook: String,
-      twitter: String,
-      instagram: String,
-      youtube: String,
+      facebook: { type: String, default: "https://facebook.com/irhaswardrobe/" },
+      instagram: { type: String, default: "https://instagram.com/irhaswardrob/" },
+      tiktok: { type: String, default: "https://www.tiktok.com/@irhaswardrobe" },
+      linkedin: { type: String, default: "https://linkedin.com/company/irhaswardrobe/" },
+      twitter: { type: String, default: "https://x.com/irhaswardrobe" },
+      youtube: { type: String, default: "https://www.youtube.com/channel/UCRoX9oOzkqk2r0VlnG0SfXA" },
     },
     homeSections: {
       categoryCards: {

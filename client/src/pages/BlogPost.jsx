@@ -365,13 +365,12 @@ const BlogPost = () => {
                   <Share2 size={18} className="text-lime-600" />
                   <span className="sr-only">Follow us</span>
                   {[
-                    { name: 'Facebook', href: 'https://www.facebook.com/irhaasae/', Icon: FaFacebookF, color: '#1877F2' },
-                    { name: 'X', href: 'https://x.com/Irhaas', Icon: FaXTwitter, color: '#000000' },
-                    { name: 'Instagram', href: 'https://www.instagram.com/irhaas/', Icon: FaInstagram, color: '#E4405F' },
-                    { name: 'LinkedIn', href: 'https://www.linkedin.com/company/irhaasae', Icon: FaLinkedinIn, color: '#0A66C2' },
-                    { name: 'Pinterest', href: 'https://www.pinterest.com/irhaas/', Icon: FaPinterestP, color: '#E60023' },
-                    { name: 'TikTok', href: 'https://www.tiktok.com/@irhaas', Icon: FaTiktok, color: '#000000' },
-                    { name: 'YouTube', href: 'https://www.youtube.com/@irhaas', Icon: FaYoutube, color: '#FF0000' },
+                    { name: 'Facebook', href: 'https://facebook.com/irhaswardrobe/', Icon: FaFacebookF, color: '#1877F2' },
+                    { name: 'Instagram', href: 'https://instagram.com/irhaswardrob/', Icon: FaInstagram, color: '#E4405F' },
+                    { name: 'TikTok', href: 'https://www.tiktok.com/@irhaswardrobe', Icon: FaTiktok, color: '#000000' },
+                    { name: 'LinkedIn', href: 'https://linkedin.com/company/irhaswardrobe/', Icon: FaLinkedinIn, color: '#0A66C2' },
+                    { name: 'X (Twitter)', href: 'https://x.com/irhaswardrobe', Icon: FaXTwitter, color: '#000000' },
+                    { name: 'YouTube', href: 'https://www.youtube.com/channel/UCRoX9oOzkqk2r0VlnG0SfXA', Icon: FaYoutube, color: '#FF0000' },
                   ].map(({ name, href, Icon, color }) => (
                     <a
                       key={name}
