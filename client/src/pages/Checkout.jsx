@@ -425,6 +425,7 @@ const Checkout = () => {
   // each is taller than a phone screen, so the phone number above it and the Continue
   // button below it were never visible at the same time. It opens on demand now.
   const [showStorePicker, setShowStorePicker] = useState(false)
+  const [isContactSaved, setIsContactSaved] = useState(() => Boolean(user?.phone && String(user.phone).trim()))
   const [step, setStep] = useState(1)
   // On the payment step the two earlier steps sit folded above the payment methods;
   // this is the one currently opened for editing (1, 2 or null).
@@ -1777,6 +1778,9 @@ const Checkout = () => {
     }))
 
     setError(null)
+    if (newAddress.phone) {
+      setIsContactSaved(true)
+    }
     setShowAddressModal(false)
     setEditingAddressId(null)
     showToast("Address saved successfully!", "success")
@@ -1863,6 +1867,9 @@ const Checkout = () => {
     }
 
     setError(null)
+    if (newAddress.phone) {
+      setIsContactSaved(true)
+    }
     showToast("Delivery address saved successfully!", "success")
     return true
   }
@@ -1890,6 +1897,9 @@ const Checkout = () => {
           await axios.put(`${config.API_URL}/api/users/profile`, payload, {
             headers: { Authorization: `Bearer ${token}` },
           })
+          if (formData.phone) {
+            setIsContactSaved(true)
+          }
         } catch (err) {
           // ignore error
         }
@@ -1902,6 +1912,9 @@ const Checkout = () => {
           await axios.put(`${config.API_URL}/api/users/profile`, { phone: pickupDetails.phone }, {
             headers: { Authorization: `Bearer ${token}` },
           })
+          if (pickupDetails.phone) {
+            setIsContactSaved(true)
+          }
         } catch (err) {
           // ignore error
         }
@@ -2028,6 +2041,15 @@ const Checkout = () => {
         setSavedAddresses(userAddresses)
 
         const defaultAddr = userAddresses.find((a) => a.isDefault) || userAddresses[0]
+
+        if (
+          String(data.phone || "").trim() ||
+          String(user?.phone || "").trim() ||
+          String(defaultAddr?.phone || "").trim() ||
+          userAddresses.some((a) => Boolean(String(a.phone || "").trim()))
+        ) {
+          setIsContactSaved(true)
+        }
 
         // Pre-fill formData
         setFormData((prev) => ({
@@ -2915,6 +2937,22 @@ const Checkout = () => {
   const paymentSummary =
     PAYMENT_METHODS.find((m) => m.id === selectedPaymentMethod)?.name || "Choose how you'd like to pay"
 
+  const hasSavedDelivery =
+    deliveryType === "home"
+      ? Boolean(savedAddresses.length > 0 && formData.address && String(formData.address).trim())
+      : Boolean(selectedStore && pickupDetails.storeId)
+
+  const currentContactPhone = deliveryType === "home" ? formData.phone : pickupDetails.phone
+  const hasSavedContact = Boolean(
+    String(currentContactPhone || "").trim() &&
+      (isContactSaved ||
+        Boolean(String(user?.phone || "").trim()) ||
+        savedAddresses.some((a) => Boolean(String(a.phone || "").trim())))
+  )
+
+  const hasSavedPayment = Boolean(selectedPaymentMethod)
+  const hasSavedNotes = Boolean(String(customerNotes || "").trim())
+
   if (authLoading) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3">
@@ -3523,19 +3561,21 @@ const Checkout = () => {
                     </p>
                     <p className="mt-0.5 text-sm text-stone-900">{deliveryDetailLine}</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (deliveryType === "home") {
-                        handleEditAddress()
-                      } else {
-                        goToSection("checkout-delivery")
-                      }
-                    }}
-                    className="flex-shrink-0 text-xs font-semibold text-stone-900 underline underline-offset-4 hover:text-brand-700"
-                  >
-                    <TranslatedText>Edit</TranslatedText>
-                  </button>
+                  {hasSavedDelivery && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (deliveryType === "home") {
+                          handleEditAddress()
+                        } else {
+                          goToSection("checkout-delivery")
+                        }
+                      }}
+                      className="flex-shrink-0 text-xs font-semibold text-stone-900 underline underline-offset-4 hover:text-brand-700"
+                    >
+                      <TranslatedText>Edit</TranslatedText>
+                    </button>
+                  )}
                 </div>
 
                 <div className="flex items-start justify-between gap-3">
@@ -3547,19 +3587,21 @@ const Checkout = () => {
                       {withDialCode(deliveryType === "home" ? formData.phone : pickupDetails.phone) || "—"}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (deliveryType === "home") {
-                        handleEditAddress()
-                      } else {
-                        goToSection("checkout-delivery")
-                      }
-                    }}
-                    className="flex-shrink-0 text-xs font-semibold text-stone-900 underline underline-offset-4 hover:text-brand-700"
-                  >
-                    <TranslatedText>Edit</TranslatedText>
-                  </button>
+                  {hasSavedContact && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (deliveryType === "home") {
+                          handleEditAddress()
+                        } else {
+                          goToSection("checkout-delivery")
+                        }
+                      }}
+                      className="flex-shrink-0 text-xs font-semibold text-stone-900 underline underline-offset-4 hover:text-brand-700"
+                    >
+                      <TranslatedText>Edit</TranslatedText>
+                    </button>
+                  )}
                 </div>
 
                 <div className="flex items-start justify-between gap-3">
@@ -3569,13 +3611,15 @@ const Checkout = () => {
                     </p>
                     <p className="mt-0.5 text-sm text-stone-900">{paymentSummary}</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => goToSection("checkout-payment")}
-                    className="flex-shrink-0 text-xs font-semibold text-stone-900 underline underline-offset-4 hover:text-brand-700"
-                  >
-                    <TranslatedText>Edit</TranslatedText>
-                  </button>
+                  {hasSavedPayment && (
+                    <button
+                      type="button"
+                      onClick={() => goToSection("checkout-payment")}
+                      className="flex-shrink-0 text-xs font-semibold text-stone-900 underline underline-offset-4 hover:text-brand-700"
+                    >
+                      <TranslatedText>Edit</TranslatedText>
+                    </button>
+                  )}
                 </div>
 
                 <div className="flex items-start justify-between gap-3">
@@ -3585,13 +3629,15 @@ const Checkout = () => {
                     </p>
                     <p className="mt-0.5 line-clamp-2 text-sm text-stone-900">{notesSummary}</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => goToSection("checkout-notes")}
-                    className="flex-shrink-0 text-xs font-semibold text-stone-900 underline underline-offset-4 hover:text-brand-700"
-                  >
-                    <TranslatedText>Edit</TranslatedText>
-                  </button>
+                  {hasSavedNotes && (
+                    <button
+                      type="button"
+                      onClick={() => goToSection("checkout-notes")}
+                      className="flex-shrink-0 text-xs font-semibold text-stone-900 underline underline-offset-4 hover:text-brand-700"
+                    >
+                      <TranslatedText>Edit</TranslatedText>
+                    </button>
+                  )}
                 </div>
               </div>
 
