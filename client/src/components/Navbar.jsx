@@ -880,20 +880,20 @@ const Navbar = () => {
           {/* Row 1: utilities left, logo centred, actions right. The three columns are
               equal-width so the logo sits on the true centre of the header regardless of
               how wide the side groups get. */}
-          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12 h-16 xl:h-20">
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12 min-h-[76px] xl:min-h-[92px] py-2">
             {/* Left column is deliberately empty so the logo reads as centred, matching
                 the reference header. Country, language, Refer & Earn and Download Our App
                 all moved into the account menu rather than being dropped. */}
             <div aria-hidden="true" />
 
             {/* Logo */}
-            <Link to={getLocalizedPath("/")} className="justify-self-center" aria-label="Irha&rsquo;s Wardrobe home">
+            <Link to={getLocalizedPath("/")} className="justify-self-center py-1 flex items-center" aria-label="Irha&rsquo;s Wardrobe home">
               <img
                 src={logos.headerDesktop || "/logo-wide.png"}
                 alt={logos.altText || "Logo"}
-                width="260"
-                height="52"
-                className="h-9 xl:h-11 w-auto object-contain"
+                width="320"
+                height="75"
+                className="h-[60px] lg:h-[70px] xl:h-[82px] w-auto max-h-[86px] object-contain transition-all duration-200"
               />
             </Link>
 
@@ -1486,20 +1486,20 @@ const Navbar = () => {
       {/* Mobile Navbar - Shown only on Mobile */}
       <header className="md:hidden bg-header-bg text-header-text shadow-sm sticky top-0 z-50">
         {/* Mobile Top Bar */}
-        <div className="flex items-center justify-between px-4 py-3">
+        <div className="flex items-center justify-between px-4 py-2">
           {/* Hamburger Menu */}
           <button onClick={toggleMobileMenu} className="p-2">
             <Menu size={24} className="text-gray-700" />
           </button>
 
           {/* Logo */}
-          <Link to={getLocalizedPath("/")} className="flex items-center">
+          <Link to={getLocalizedPath("/")} className="flex items-center py-1">
             <img
               src={logos.headerMobile || "/logo-wide.png"}
               alt={logos.altText || "Logo"}
-              width="170"
-              height="34"
-              className="h-7 w-auto max-w-[190px] object-contain"
+              width="200"
+              height="48"
+              className="h-11 sm:h-12 w-auto max-w-[210px] sm:max-w-[240px] object-contain transition-all duration-200"
             />
           </Link>
 

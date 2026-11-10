@@ -235,8 +235,8 @@ const Footer = () => {
             {/* Logo (replace src with V Perfumes white logo path) */}
             <img
               src="/logo.png"
-              alt="Grab– White Logo"
-              className="h-14 w-auto opacity-90"
+              alt="Irha's Wardrobe Logo"
+              className="h-14 w-auto bg-white/95 px-4 py-2 rounded-lg shadow-sm"
               loading="lazy"
             />
 

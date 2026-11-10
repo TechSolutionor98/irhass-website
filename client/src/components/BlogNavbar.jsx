@@ -404,12 +404,12 @@ const Header = () => {
                 {showLogo ? (
                   <img
                     src="/logo.png"
-                    alt="GrabaZz logo"
-                    className="h-8 w-auto object-contain"
+                    alt="Irha's Wardrobe logo"
+                    className="h-11 w-auto object-contain"
                     onError={() => setShowLogo(false)}
                   />
                 ) : (
-                  <span className="text-lg font-bold text-gray-900">GrabaZz</span>
+                  <span className="text-lg font-bold text-gray-900">Irha&apos;s Wardrobe</span>
                 )}
               </Link>
             </div>
@@ -468,12 +468,12 @@ const Header = () => {
               {showLogo ? (
                 <img
                   src="/logo.png"
-                  alt="GrabaZz logo"
-                  className="h-14 w-auto object-contain"
+                  alt="Irha's Wardrobe logo"
+                  className="h-16 xl:h-20 w-auto object-contain"
                   onError={() => setShowLogo(false)}
                 />
               ) : (
-                <h1 className="text-xl font-bold text-gray-900">GrabaZz</h1>
+                <h1 className="text-xl font-bold text-gray-900">Irha&apos;s Wardrobe</h1>
               )}
             </Link>
 
