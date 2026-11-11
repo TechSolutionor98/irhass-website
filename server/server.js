@@ -16,6 +16,7 @@ import sharp from "sharp"
 import connectDB, { connectBlogDB } from "./config/db.js"
 import config from "./config/config.js"
 import { notFound, errorHandler } from "./middleware/errorMiddleware.js"
+import { ensurePortAvailable, setupGracefulShutdown } from "./utils/portManager.js"
 import cacheService from "./services/cacheService.js"
 import { attachCacheService, autoInvalidateAllCacheOnMutation } from "./middleware/cacheMiddleware.js"
 import publicCache from "./middleware/publicCacheMiddleware.js"
@@ -103,6 +104,9 @@ import { ensureSubCategorySlugIndexes } from "./utils/ensureSubCategorySlugIndex
 import { ensurePaymentChargeIndexes } from "./utils/ensurePaymentChargeIndexes.js"
 
 dotenv.config()
+
+// Ensure PORT is available before initializing database pools and background tasks
+await ensurePortAvailable(config.PORT, { isDev: config.NODE_ENV === "development" })
 
 // Connect to databases - await both
 await connectDB()
@@ -380,8 +384,8 @@ app.use(errorHandler)
 
 const PORT = config.PORT
 
-app.listen(PORT, () => {
-  console.log(`Server running in ${config.NODE_ENV} mode on port ${PORT}`)
+const server = app.listen(PORT, () => {
+  console.log(`🚀 Server running in ${config.NODE_ENV} mode on port ${PORT}`)
 
   // A campaign still marked "sending" means the process died partway through it.
   // It is left paused for a person to look at, never restarted automatically: a
@@ -390,3 +394,16 @@ app.listen(PORT, () => {
     console.error("[campaignSender] could not check for interrupted campaigns:", error),
   )
 })
+
+server.on("error", (error) => {
+  if (error.code === "EADDRINUSE") {
+    console.error(`❌ Port ${PORT} is already in use (EADDRINUSE). Please ensure no duplicate instance is running.`)
+  } else {
+    console.error("❌ Server listen error:", error)
+  }
+  process.exit(1)
+})
+
+setupGracefulShutdown(server)
+
+export default server

@@ -1,0 +1,27 @@
+{
+  "restartable": "rs",
+  "watch": [
+    "server.js",
+    "controllers",
+    "models",
+    "routes",
+    "middleware",
+    "utils",
+    "services",
+    "config"
+  ],
+  "ignore": [
+    "uploads/**",
+    "uploads/*",
+    "logs/**",
+    "*.log",
+    "temp/**",
+    "node_modules/**",
+    "scripts/**",
+    ".git/**"
+  ],
+  "ext": "js,mjs,json",
+  "delay": 500,
+  "signal": "SIGINT"
+}
+
