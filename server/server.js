@@ -128,25 +128,55 @@ const app = express()
 app.set('trust proxy', true)
 
 // CORS configuration
-app.use(cors({
-  origin: [
-    'https://www.irhaas.ae',
-    'https://www.irhaas.com',
-    'http://localhost:3000'
-  ],
+const allowedOrigins = [
+  'https://irhaas.com',
+  'https://www.irhaas.com',
+  'https://irhaas.ae',
+  'https://www.irhaas.ae',
+  'https://api.irhaas.com',
+  'https://api.irhaas.ae',
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5173',
+];
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow non-browser requests (e.g. mobile apps, curl, server-to-server)
+    if (!origin) return callback(null, true);
+
+    if (
+      allowedOrigins.includes(origin) ||
+      /^https?:\/\/(?:[a-zA-Z0-9-]+\.)?irhaas\.(?:com|ae)(?::\d+)?$/.test(origin) ||
+      /^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/.test(origin)
+    ) {
+      return callback(null, true);
+    }
+
+    callback(null, false);
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-SEO-Unlock-Token', 'X-SEO-Settings-Unlock', 'Cache-Control', 'Pragma', 'X-Requested-With'],
-  exposedHeaders: ['WWW-Authenticate', 'Server-Authorization'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'Accept',
+    'Origin',
+    'X-SEO-Unlock-Token',
+    'X-SEO-Settings-Unlock',
+    'Cache-Control',
+    'Pragma',
+    'X-Requested-With',
+    'Range'
+  ],
+  exposedHeaders: ['WWW-Authenticate', 'Server-Authorization', 'Content-Range', 'Accept-Ranges'],
   maxAge: 86400,
   credentials: true,
   optionsSuccessStatus: 200
-}));
+};
 
-app.options("*", (req, res) => {
-  res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, Origin, X-SEO-Unlock-Token, X-SEO-Settings-Unlock, Cache-Control, Pragma, X-Requested-With");
-  res.send();
-});
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 const uploadsPath = path.join(__dirname, 'uploads');
 
