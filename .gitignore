@@ -17,6 +17,9 @@ build/
 
 # Customer-uploaded files — not source, and may contain personal data.
 uploads/
+*.zip
+*.tar.gz
+*.rar
 
 # The previous project's git history, kept locally as a backup.
 .git-graba2z-history-backup/

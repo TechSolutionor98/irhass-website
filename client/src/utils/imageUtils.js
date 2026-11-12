@@ -43,6 +43,10 @@ export const getFullImageUrl = (imageUrl) => {
       // Extract just the /uploads/... part
       const uploadsMatch = normalizedUrl.match(/(\/uploads\/.+)/)
       if (uploadsMatch) {
+        if (config.UPLOADS_URL) {
+          const subPath = uploadsMatch[1].replace(/^\/uploads\/?/, "")
+          return `${config.UPLOADS_URL}/${subPath}`
+        }
         return `${config.API_URL}${uploadsMatch[1]}`
       }
     }
@@ -53,9 +57,13 @@ export const getFullImageUrl = (imageUrl) => {
         const urlObj = new URL(normalizedUrl)
         const currentApiHost = new URL(config.API_URL).hostname
         
-        // If the hostname doesn't match, replace with current API_URL
+        // If the hostname doesn't match, replace with configured uploads URL or current API_URL
         if (urlObj.hostname !== currentApiHost) {
           const uploadsPath = urlObj.pathname
+          if (config.UPLOADS_URL) {
+            const subPath = uploadsPath.replace(/^\/uploads\/?/, "")
+            return `${config.UPLOADS_URL}/${subPath}`
+          }
           return `${config.API_URL}${uploadsPath}`
         }
       } catch (e) {
@@ -67,13 +75,21 @@ export const getFullImageUrl = (imageUrl) => {
     return normalizedUrl
   }
   
-  // Local file path - prepend API URL
+  // Local file path - prepend configured Uploads URL or API URL
   if (normalizedUrl.startsWith("/uploads")) {
+    if (config.UPLOADS_URL) {
+      const subPath = normalizedUrl.replace(/^\/uploads\/?/, "")
+      return `${config.UPLOADS_URL}/${subPath}`
+    }
     return `${config.API_URL}${normalizedUrl}`
   }
   
   // Handle case where it might be just "uploads/..." without leading slash
   if (normalizedUrl.startsWith("uploads/")) {
+    if (config.UPLOADS_URL) {
+      const subPath = normalizedUrl.replace(/^uploads\/?/, "")
+      return `${config.UPLOADS_URL}/${subPath}`
+    }
     return `${config.API_URL}/${normalizedUrl}`
   }
   

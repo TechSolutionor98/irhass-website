@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext"
 import { useToast } from "../context/ToastContext"
 import axios from "axios"
 import config from "../config/config.js"
+import { getFullImageUrl } from "../utils/imageUtils.js"
 import { Star, X, ThumbsUp, Flag, User, ImageIcon, CheckCircle, Mail, Shield, ChevronDown, ChevronUp } from "lucide-react"
 
 const ReviewSection = ({ productId, onStatsUpdate }) => {
@@ -742,10 +743,10 @@ const ReviewSection = ({ productId, onStatsUpdate }) => {
                 {review.image && (
                   <div className="mb-4">
                     <img
-                      src={`${config.API_URL}/uploads/reviews/${review.image}`}
+                      src={getFullImageUrl(review.image.startsWith("/") || review.image.includes("uploads") ? review.image : `/uploads/reviews/${review.image}`)}
                       alt="Review"
                       className="h-28 w-28 cursor-pointer border border-stone-200 object-cover transition-colors hover:border-stone-900"
-                      onClick={() => window.open(`${config.API_URL}/uploads/reviews/${review.image}`, "_blank")}
+                      onClick={() => window.open(getFullImageUrl(review.image.startsWith("/") || review.image.includes("uploads") ? review.image : `/uploads/reviews/${review.image}`), "_blank")}
                     />
                   </div>
                 )}

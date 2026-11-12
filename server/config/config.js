@@ -6,6 +6,8 @@ const config = {
   // Server Configuration
   PORT: process.env.PORT || 5000,
   NODE_ENV: process.env.NODE_ENV || "development",
+  API_BASE_URL: process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 5000}`,
+  UPLOADS_BASE_URL: process.env.UPLOADS_BASE_URL || process.env.UPLOADS_URL || `${process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 5000}`}/uploads`,
 
   // Database Configuration
   MONGO_URI: process.env.MONGO_URI,

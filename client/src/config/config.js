@@ -20,9 +20,30 @@ const resolveTranslationApiUrl = () => {
   return "https://langaimodel.irhaas.com" // Production translation API on VPS
 }
 
+// Resolve Uploads / Media Base URL
+const resolveUploadsUrl = () => {
+  const envUrl = (
+    import.meta.env?.VITE_UPLOADS_URL ||
+    import.meta.env?.VITE_IMAGE_BASE_URL ||
+    import.meta.env?.VITE_MEDIA_URL ||
+    ""
+  ).trim()
+
+  if (envUrl && /^https?:\/\//i.test(envUrl)) return envUrl.replace(/\/$/, "")
+
+  // Local fallback for development, live fallback for production.
+  if (import.meta.env?.DEV) return "http://localhost:5000/uploads"
+
+  return "https://api.irhaas.com/uploads"
+}
+
 const config = {
   // API Configuration - Handle both development and production
   API_URL: resolveApiUrl(),
+
+  // Uploads / Image Base URL from .env
+  UPLOADS_URL: resolveUploadsUrl(),
+  IMAGE_BASE_URL: resolveUploadsUrl(),
 
   // Translation Model API
   TRANSLATION_API_URL: resolveTranslationApiUrl(),
