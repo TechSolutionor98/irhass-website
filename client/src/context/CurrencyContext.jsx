@@ -70,6 +70,14 @@ export const CurrencyProvider = ({ children }) => {
   }, [])
 
   useEffect(() => {
+    try {
+      const hasCached = sessionStorage.getItem(COUNTRIES_CACHE_KEY)
+      if (hasCached) {
+        // Refresh quietly in background after critical rendering has settled
+        const t = setTimeout(() => fetchCountries(), 2500)
+        return () => clearTimeout(t)
+      }
+    } catch {}
     fetchCountries()
   }, [fetchCountries])
 

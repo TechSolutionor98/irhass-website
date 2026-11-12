@@ -22,22 +22,26 @@ const ProductGallery = ({ limit = 10, skipIds = [] }) => {
 
   useEffect(() => {
     let alive = true
-    ;(async () => {
-      try {
-        // Over-fetch: some of what comes back is already on the featured rail above,
-        // and a gallery that repeats it looks like a bug.
-        const res = await fetch(`${config.API_URL}/api/products?limit=${limit * 3}`)
-        if (!res.ok) return
-        const data = await res.json()
-        const list = Array.isArray(data) ? data : data?.products || data?.data || []
-        const skip = new Set(skipIds)
-        if (alive) setProducts(list.filter((p) => p?.image && !skip.has(p._id)).slice(0, limit))
-      } catch {
-        // Silent: the home page reads fine without this section.
-      }
-    })()
+    const timer = setTimeout(() => {
+      ;(async () => {
+        try {
+          // Over-fetch: some of what comes back is already on the featured rail above,
+          // and a gallery that repeats it looks like a bug.
+          const res = await fetch(`${config.API_URL}/api/products?limit=${limit * 2}`)
+          if (!res.ok) return
+          const data = await res.json()
+          const list = Array.isArray(data) ? data : data?.products || data?.data || []
+          const skip = new Set(skipIds)
+          if (alive) setProducts(list.filter((p) => p?.image && !skip.has(p._id)).slice(0, limit))
+        } catch {
+          // Silent: the home page reads fine without this section.
+        }
+      })()
+    }, 200)
+
     return () => {
       alive = false
+      clearTimeout(timer)
     }
   }, [limit, skipIds])
 

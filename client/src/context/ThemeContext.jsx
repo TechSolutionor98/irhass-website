@@ -84,7 +84,7 @@ export const ThemeProvider = ({ children }) => {
     const cached = typeof window !== "undefined" ? readCache() : null
     const fresh = cached && Date.now() - cached.savedAt < CACHE_TTL_MS
 
-    if (!force && fresh && fetchedAt.current) {
+    if (!force && fresh) {
       setLoading(false)
       return cached.theme
     }

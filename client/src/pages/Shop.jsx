@@ -11,6 +11,7 @@ import HomeStyleProductCard from "../components/HomeStyleProductCard"
 import ProductSchema from "../components/ProductSchema"
 import SEO from "../components/SEO"
 import productCache, { scoreSearchRelevance } from "../services/productCache"
+import { getCategoryTreeCached } from "../services/categoryTreeCache"
 import { generateShopURL, parseShopURL, createSlug } from "../utils/urlUtils"
 import { createMetaDescription, generateSEOTitle } from "../utils/seoHelpers"
 import { getFullImageUrl } from "../utils/imageUtils"
@@ -1292,13 +1293,10 @@ const Shop = () => {
 
   const fetchCategories = async () => {
     try {
-      // Use the same tree endpoint as Navbar to ensure consistency
-      // `lite` leaves out the long SEO copy, which is 1.8 MB of this response
-      // and is not used to draw a menu. The one category the page renders is
-      // fetched on its own below.
-      const { data } = await axios.get(`${API_BASE_URL}/api/categories/tree?lite=1`)
+      // Use cached category tree to eliminate redundant network fetches
+      const data = await getCategoryTreeCached()
 
-      const validCategories = data.filter((cat) => {
+      const validCategories = (Array.isArray(data) ? data : []).filter((cat) => {
         const isValid =
           cat &&
           typeof cat === "object" &&

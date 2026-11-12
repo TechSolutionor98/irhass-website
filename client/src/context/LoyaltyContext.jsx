@@ -21,6 +21,16 @@ const CATEGORY_CHAIN = [
   { field: "parentCategory", scope: "category" },
 ]
 
+const LOYALTY_SETTINGS_CACHE_KEY = "loyalty-settings-cache"
+
+const readCachedLoyalty = () => {
+  try {
+    const raw = localStorage.getItem(LOYALTY_SETTINGS_CACHE_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return null
+}
+
 const refIdOf = (value) => {
   if (!value) return null
   if (typeof value === "string") return value
@@ -42,9 +52,20 @@ const applyRounding = (value, mode) => {
 
 export const LoyaltyProvider = ({ children }) => {
   const { isAuthenticated } = useAuth()
+  const initialCached = useMemo(() => readCachedLoyalty(), [])
 
-  const [settings, setSettings] = useState({ isEnabled: false })
-  const [ruleMap, setRuleMap] = useState(() => new Map())
+  const [settings, setSettings] = useState(
+    () => initialCached?.settings || { isEnabled: false },
+  )
+  const [ruleMap, setRuleMap] = useState(() => {
+    const map = new Map()
+    if (Array.isArray(initialCached?.rules)) {
+      for (const rule of initialCached.rules) {
+        map.set(`${rule.scope}:${rule.refId}`, rule)
+      }
+    }
+    return map
+  })
   const [balance, setBalance] = useState(0)
   const [pending, setPending] = useState(0)
   const [loadingBalance, setLoadingBalance] = useState(false)
@@ -53,6 +74,11 @@ export const LoyaltyProvider = ({ children }) => {
   const fetchSettings = useCallback(async () => {
     try {
       const { data } = await axios.get(`${config.API_URL}/api/loyalty/settings`)
+      if (data) {
+        try {
+          localStorage.setItem(LOYALTY_SETTINGS_CACHE_KEY, JSON.stringify(data))
+        } catch {}
+      }
       setSettings(data?.settings || { isEnabled: false })
 
       const map = new Map()
@@ -63,10 +89,12 @@ export const LoyaltyProvider = ({ children }) => {
     } catch {
       // A loyalty outage must not break the storefront: fall back to "programme off",
       // which simply hides every points affordance.
-      setSettings({ isEnabled: false })
-      setRuleMap(new Map())
+      if (!initialCached) {
+        setSettings({ isEnabled: false })
+        setRuleMap(new Map())
+      }
     }
-  }, [])
+  }, [initialCached])
 
   const refreshBalance = useCallback(async () => {
     const token = localStorage.getItem("token")

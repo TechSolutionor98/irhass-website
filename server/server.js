@@ -299,6 +299,10 @@ app.use(
     "/api/theme",
     "/api/settings",
     "/api/countries",
+    "/api/loyalty/settings",
+    "/api/referrals/settings",
+    "/api/delivery-charges",
+    "/api/popup-settings",
   ],
   publicCache,
 )

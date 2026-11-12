@@ -79,15 +79,11 @@ router.get(
         hideFromShop: { $ne: true }
       })
         .select(
-          'name nameAr slug sku price buyingPrice offerPrice discount image stockStatus stockStatusAr countInStock brand category subCategory parentCategory subCategory2 subCategory3 subCategory4 rating numReviews',
+          'name nameAr slug sku price buyingPrice offerPrice discount image stockStatus stockStatusAr countInStock brand category subCategory parentCategory rating numReviews',
         )
         .populate('brand', 'name nameAr slug')
         .populate('category', 'name nameAr slug')
-        .populate('subCategory', 'name nameAr slug')
         .populate('parentCategory', 'name nameAr slug')
-        .populate('subCategory2', 'name nameAr slug')
-        .populate('subCategory3', 'name nameAr slug')
-        .populate('subCategory4', 'name nameAr slug')
         .sort({ 
           // In-stock products first
           stockStatus: 1,
@@ -96,46 +92,6 @@ router.get(
         .limit(12)
         .lean(),
     ])
-
-    // Get brand IDs for quick lookup
-    const brandMap = {}
-    brands.forEach(b => {
-      brandMap[b.name.toLowerCase()] = b._id
-    })
-
-    // Fetch brand-specific products in parallel (3 each for homepage sliders)
-    const brandNames = ['HP', 'Dell', 'ASUS', 'Acer', 'MSI', 'Lenovo', 'Apple', 'Samsung']
-    const brandProductPromises = brandNames.map(brandName => {
-      const brandId = brands.find(b => b.name.toLowerCase() === brandName.toLowerCase())?._id
-      if (!brandId) return Promise.resolve([])
-      
-      return Product.find({
-        isActive: true,
-        hideFromShop: { $ne: true },
-        brand: brandId
-      })
-        .select(
-          'name nameAr slug sku price buyingPrice offerPrice discount image stockStatus stockStatusAr countInStock brand category subCategory parentCategory subCategory2 subCategory3 subCategory4 rating numReviews',
-        )
-        .populate('brand', 'name nameAr slug')
-        .populate('category', 'name nameAr slug')
-        .populate('subCategory', 'name nameAr slug')
-        .populate('parentCategory', 'name nameAr slug')
-        .populate('subCategory2', 'name nameAr slug')
-        .populate('subCategory3', 'name nameAr slug')
-        .populate('subCategory4', 'name nameAr slug')
-        .sort({ stockStatus: 1, createdAt: -1 })
-        .limit(4)
-        .lean()
-    })
-
-    const brandProducts = await Promise.all(brandProductPromises)
-
-    // Organize brand products
-    const brandProductsMap = {}
-    brandNames.forEach((name, index) => {
-      brandProductsMap[name.toLowerCase()] = brandProducts[index]
-    })
 
     // Organize banners by position
     const heroBanners = banners.filter(
@@ -157,6 +113,9 @@ router.get(
     const homeBanners = banners.filter(
       (b) => typeof b.position === "string" && b.position.toLowerCase().startsWith("home"),
     )
+
+    // Legacy brandProducts map kept empty for backwards compatibility
+    const brandProductsMap = {}
 
     const responseTime = Date.now() - startTime
 

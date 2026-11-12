@@ -608,6 +608,7 @@ const Home = () => {
         setBrands(leanValidBrands)
         setSettings(settingsData)
         setHomeSections(sectionsData)
+        setFeaturedProducts(featured)
 
         // The brand and category product rails that used to live below the campaign
         // banner are gone, and with them eleven product requests per page load. The
@@ -941,7 +942,7 @@ const Home = () => {
       />
 
       {/* Featured rail. Renders nothing when no product is flagged featured. */}
-      <FeaturedProducts />
+      <FeaturedProducts initialProducts={featuredProducts} />
 
       {/* Wordless photo wall. Hidden until there are enough products to fill a row. */}
       <ProductGallery />
@@ -953,7 +954,7 @@ const Home = () => {
       />
 
       {/* Six products from each category, straight from the API. */}
-      <CategoryShowcase />
+      <CategoryShowcase categories={categories} />
 
       {/* What the shop promises, as a dark band leading into the footer. */}
       <ServicePromises />

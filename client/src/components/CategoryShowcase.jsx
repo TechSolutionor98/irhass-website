@@ -88,49 +88,63 @@ const ProductTile = ({ product }) => {
   )
 }
 
-const CategoryShowcase = ({ perCategory = 6 }) => {
+const CategoryShowcase = ({ perCategory = 6, categories: passedCategories = null }) => {
   const { getLocalizedPath } = useLanguage()
   const [rows, setRows] = useState([])
 
   useEffect(() => {
     let alive = true
 
-    ;(async () => {
-      try {
-        const res = await fetch(`${config.API_URL}/api/categories`)
-        if (!res.ok) return
-        const data = await res.json()
-        const categories = (Array.isArray(data) ? data : data?.categories || []).filter((c) => c?._id && c?.name)
-        if (categories.length === 0) return
+    const timer = setTimeout(() => {
+      ;(async () => {
+        try {
+          let categories =
+            Array.isArray(passedCategories) && passedCategories.length > 0
+              ? passedCategories
+              : null
 
-        // One request per category, in parallel: six small queries beat one large one
-        // that would have to be grouped client-side.
-        const loaded = await Promise.all(
-          categories.map(async (category) => {
-            try {
-              const r = await fetch(
-                `${config.API_URL}/api/products?parentCategory=${category._id}&limit=${perCategory}`,
-              )
-              if (!r.ok) return null
-              const d = await r.json()
-              const products = Array.isArray(d) ? d : d?.products || d?.data || []
-              return products.length > 0 ? { category, products: products.slice(0, perCategory) } : null
-            } catch {
-              return null
-            }
-          }),
-        )
+          if (!categories) {
+            const res = await fetch(`${config.API_URL}/api/categories`)
+            if (!res.ok) return
+            const data = await res.json()
+            categories = (Array.isArray(data) ? data : data?.categories || []).filter(
+              (c) => c?._id && c?.name,
+            )
+          }
 
-        if (alive) setRows(loaded.filter(Boolean))
-      } catch {
-        // The home page reads fine without this section.
-      }
-    })()
+          if (!categories || categories.length === 0) return
+
+          // One request per category, in parallel (up to 4 categories)
+          const loaded = await Promise.all(
+            categories.slice(0, 4).map(async (category) => {
+              try {
+                const r = await fetch(
+                  `${config.API_URL}/api/products?parentCategory=${category._id}&limit=${perCategory}`,
+                )
+                if (!r.ok) return null
+                const d = await r.json()
+                const products = Array.isArray(d) ? d : d?.products || d?.data || []
+                return products.length > 0
+                  ? { category, products: products.slice(0, perCategory) }
+                  : null
+              } catch {
+                return null
+              }
+            }),
+          )
+
+          if (alive) setRows(loaded.filter(Boolean))
+        } catch {
+          // The home page reads fine without this section.
+        }
+      })()
+    }, 250)
 
     return () => {
       alive = false
+      clearTimeout(timer)
     }
-  }, [perCategory])
+  }, [perCategory, passedCategories])
 
   if (rows.length === 0) return null
 

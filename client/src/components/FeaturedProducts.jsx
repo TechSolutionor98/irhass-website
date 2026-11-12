@@ -18,20 +18,30 @@ import config from "../config/config"
  * arrows only render when there is actually something off-screen in that direction --
  * the same treatment as the category bar.
  */
-const FeaturedProducts = ({ title = "Featured", limit = 12, viewAllHref = "/shop" }) => {
+const FeaturedProducts = ({ title = "Featured", limit = 12, viewAllHref = "/shop", initialProducts = null }) => {
   const { getLocalizedPath, currentLanguage } = useLanguage()
   const { formatPrice } = useCurrency()
   const { addToCart } = useCart()
   const railRef = useRef(null)
 
-  const [products, setProducts] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [products, setProducts] = useState(() =>
+    Array.isArray(initialProducts) && initialProducts.length > 0 ? initialProducts : [],
+  )
+  const [loading, setLoading] = useState(
+    () => !(Array.isArray(initialProducts) && initialProducts.length > 0),
+  )
   const [failed, setFailed] = useState(false)
   const [scroll, setScroll] = useState({ prev: false, next: false })
 
   const isArabic = currentLanguage?.code === "ar"
 
   useEffect(() => {
+    if (Array.isArray(initialProducts) && initialProducts.length > 0) {
+      setProducts(initialProducts)
+      setLoading(false)
+      return
+    }
+
     let alive = true
     const load = async () => {
       try {
@@ -51,7 +61,7 @@ const FeaturedProducts = ({ title = "Featured", limit = 12, viewAllHref = "/shop
     return () => {
       alive = false
     }
-  }, [limit])
+  }, [limit, initialProducts])
 
   const updateScroll = useCallback(() => {
     const el = railRef.current
