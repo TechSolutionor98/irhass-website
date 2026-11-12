@@ -12,8 +12,8 @@ export const BRAND_ASSETS = {
   storeName: "Irha's Wardrobe",
   websiteUrl: "https://www.irhaas.com",
   // Official website logos hosted on high-availability HTTPS CDN
-  logoWideUrl: "https://res.cloudinary.com/dyfhsu5v6/image/upload/v1794339820/irhaas-branding/irhaas-logo-wide.png",
-  logoSquareUrl: "https://res.cloudinary.com/dyfhsu5v6/image/upload/v1794339822/irhaas-branding/irhaas-logo.png",
+  logoWideUrl: "https://res.cloudinary.com/dyfhsu5v6/image/upload/v1794465065/irhaas-branding/irhaas-logo-wide.png",
+  logoSquareUrl: "https://res.cloudinary.com/dyfhsu5v6/image/upload/v1794465067/irhaas-branding/irhaas-logo.png",
   colors: {
     primary: "#8e6937",        // Official Irha's Wardrobe warm gold
     primaryHover: "#684e2c",   // Deeper gold hover
