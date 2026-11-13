@@ -82,6 +82,7 @@ const PromoBanner = ({
           loop
           muted
           playsInline
+          preload="metadata"
           className="absolute inset-0 h-full w-full object-cover object-center pointer-events-none"
         >
           <source src={videoUrl} type="video/mp4" />
@@ -96,6 +97,7 @@ const PromoBanner = ({
           alt={headline || "Hero Background"}
           className="absolute inset-0 h-full w-full object-cover object-center pointer-events-none"
           loading="eager"
+          decoding="async"
         />
       )}
 

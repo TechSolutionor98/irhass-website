@@ -291,7 +291,27 @@ router.post(
   }
 )
 
-// @desc    Upload video (MP4/WebM only)
+const handleVideoUpload = (req, res, next) => {
+  uploadVideo.single("video")(req, res, (err) => {
+    if (!err) return next()
+
+    console.error("❌ Video upload multer error:", err)
+
+    if (err.code === "LIMIT_FILE_SIZE") {
+      return res.status(400).json({
+        success: false,
+        message: "Video file is too large (maximum limit is 100MB). Please compress the video.",
+      })
+    }
+
+    return res.status(400).json({
+      success: false,
+      message: err.message || "Invalid video file upload.",
+    })
+  })
+}
+
+// @desc    Upload video (MP4/WebM/MOV)
 // @route   POST /api/upload/video
 // @access  Private/Admin
 router.post(
@@ -300,9 +320,7 @@ router.post(
     console.log("📤 Video upload request received")
     next()
   },
-  protect,
-  admin,
-  uploadVideo.single("video"),
+  handleVideoUpload,
   (req, res) => {
     try {
       console.log("📁 Video upload attempt")

@@ -138,6 +138,8 @@ const bannerSchema = mongoose.Schema(
   },
 )
 
+bannerSchema.index({ isActive: 1, position: 1, sortOrder: 1 })
+
 const Banner = mongoose.model("Banner", bannerSchema)
 
 export default Banner

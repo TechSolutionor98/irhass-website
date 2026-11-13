@@ -128,12 +128,21 @@ const productImageFileFilter = (req, file, cb) => {
 const videoFileFilter = (req, file, cb) => {
   console.log("🎥 Video received:", file.originalname, file.mimetype)
 
-  const allowedMimes = ["video/mp4", "video/webm"]
-  
-  if (allowedMimes.includes(file.mimetype)) {
+  const allowedMimes = [
+    "video/mp4",
+    "video/webm",
+    "video/quicktime",
+    "video/x-m4v",
+    "video/ogg",
+    "application/octet-stream",
+  ]
+  const ext = path.extname(file.originalname || "").toLowerCase()
+  const allowedExts = [".mp4", ".webm", ".mov", ".m4v", ".ogg"]
+
+  if (allowedMimes.includes(file.mimetype) || allowedExts.includes(ext)) {
     cb(null, true)
   } else {
-    cb(new Error("Only MP4 and WebM videos are allowed!"), false)
+    cb(new Error("Only video files (MP4, WebM, MOV, M4V) are allowed!"), false)
   }
 }
 
@@ -175,12 +184,19 @@ const emailImageFileFilter = (req, file, cb) => {
 const videoStorage = multer.diskStorage({
   destination: function (req, file, cb) {
     const destPath = path.join(uploadsDir, "videos")
+    if (!fs.existsSync(destPath)) {
+      try {
+        fs.mkdirSync(destPath, { recursive: true })
+      } catch (err) {
+        console.error("Failed to create videos directory:", err)
+      }
+    }
     cb(null, destPath)
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9)
-    const ext = path.extname(file.originalname)
-    const nameWithoutExt = path.basename(file.originalname, ext)
+    const ext = path.extname(file.originalname || "") || ".mp4"
+    const nameWithoutExt = path.basename(file.originalname || "video", ext)
     const sanitizedName = nameWithoutExt.replace(/[^a-zA-Z0-9]/g, "_")
     cb(null, "video-" + sanitizedName + "-" + uniqueSuffix + ext)
   },

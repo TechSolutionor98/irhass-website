@@ -58,6 +58,7 @@ const AdminBanners = () => {
   const [editingBanner, setEditingBanner] = useState(null)
 
   const [videoUploading, setVideoUploading] = useState(false)
+  const [videoUploadProgress, setVideoUploadProgress] = useState(0)
   const [videoUploadError, setVideoUploadError] = useState(null)
   const videoInputRef = useRef(null)
 
@@ -152,27 +153,46 @@ const AdminBanners = () => {
     const file = e.target.files?.[0]
     if (!file) return
 
-    if (!file.type.startsWith("video/")) {
-      setVideoUploadError("Please select a valid video file (MP4, WebM).")
+    const ext = (file.name || "").substring((file.name || "").lastIndexOf(".")).toLowerCase()
+    const isAllowedExt = [".mp4", ".webm", ".mov", ".m4v", ".ogg"].includes(ext)
+
+    if (!file.type.startsWith("video/") && !isAllowedExt) {
+      setVideoUploadError("Please select a valid video file (MP4, WebM, MOV).")
       return
     }
 
-    if (file.size > 80 * 1024 * 1024) {
-      setVideoUploadError("Video file size must be less than 80MB.")
+    if (file.size > 100 * 1024 * 1024) {
+      setVideoUploadError("Video file size must be less than 100MB.")
       return
     }
 
     try {
       setVideoUploading(true)
+      setVideoUploadProgress(0)
       setVideoUploadError(null)
-      const token = localStorage.getItem("adminToken")
+
+      const token =
+        localStorage.getItem("adminToken") ||
+        localStorage.getItem("token") ||
+        localStorage.getItem("authToken")
+
       const uploadData = new FormData()
       uploadData.append("video", file)
 
+      const headers = {
+        "Content-Type": "multipart/form-data",
+      }
+      if (token) {
+        headers.Authorization = `Bearer ${token}`
+      }
+
       const response = await axios.post(`${config.API_URL}/api/upload/video`, uploadData, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-          Authorization: `Bearer ${token}`,
+        headers,
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total) {
+            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+            setVideoUploadProgress(percentCompleted)
+          }
         },
       })
 
@@ -185,9 +205,20 @@ const AdminBanners = () => {
       }
     } catch (err) {
       console.error("Video upload failed:", err)
-      setVideoUploadError(err.response?.data?.message || "Failed to upload video.")
+      let errorMsg = "Failed to upload video."
+      if (err.response?.status === 413) {
+        errorMsg = "Video file is too large for the server limit. Please compress the video or enter a direct video URL."
+      } else if (err.response?.status === 401) {
+        errorMsg = "Authentication failed. Please re-login to Admin."
+      } else if (err.response?.data?.message) {
+        errorMsg = err.response.data.message
+      } else if (err.message) {
+        errorMsg = err.message
+      }
+      setVideoUploadError(errorMsg)
     } finally {
       setVideoUploading(false)
+      setVideoUploadProgress(0)
     }
   }
 
@@ -632,7 +663,7 @@ const AdminBanners = () => {
                         <input
                           ref={videoInputRef}
                           type="file"
-                          accept="video/mp4,video/webm"
+                          accept="video/mp4,video/webm,video/quicktime,video/*"
                           onChange={handleVideoUpload}
                           className="hidden"
                         />
@@ -644,7 +675,7 @@ const AdminBanners = () => {
                         >
                           {videoUploading ? (
                             <>
-                              <Loader2 className="w-4 h-4 animate-spin" /> Uploading Video...
+                              <Loader2 className="w-4 h-4 animate-spin" /> Uploading ({videoUploadProgress}%)...
                             </>
                           ) : (
                             <>
@@ -658,10 +689,23 @@ const AdminBanners = () => {
                             type="text"
                             value={formData.video}
                             onChange={(e) => setFormData({ ...formData, video: e.target.value })}
-                            placeholder="Or enter direct video URL (e.g. /uploads/video.mp4)"
+                            placeholder="Or enter direct video URL (e.g. /uploads/videos/banner.mp4 or Cloudinary URL)"
                             className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm"
                           />
                         </div>
+                      </div>
+
+                      {videoUploading && (
+                        <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden mt-1">
+                          <div
+                            className="bg-blue-600 h-2 rounded-full transition-all duration-200"
+                            style={{ width: `${videoUploadProgress}%` }}
+                          />
+                        </div>
+                      )}
+
+                      <div className="text-[11px] text-gray-500 mt-1">
+                        Supported: MP4, WebM, MOV (up to 100MB). You can also paste an external or hosted video URL directly.
                       </div>
 
                       {videoUploadError && (

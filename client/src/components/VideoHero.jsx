@@ -62,8 +62,8 @@ const VideoHero = ({
           src={desktopImage || mobileImage}
           alt={activeBanner?.title || "Second banner"}
           className="absolute inset-0 h-full w-full object-cover object-center"
-          loading="eager"
-          fetchPriority="high"
+          loading="lazy"
+          decoding="async"
         />
       </picture>
     </div>
