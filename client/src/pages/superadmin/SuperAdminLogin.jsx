@@ -58,13 +58,6 @@ const SuperAdminLogin = () => {
       <div className="w-full max-w-md">
         {/* Header */}
         <div className="text-center mb-8">
-          <img
-            src="/logo.png"
-            alt="Irha's Wardrobe"
-            width="112"
-            height="160"
-            className="mx-auto mb-5 h-28 w-auto object-contain"
-          />
           <h1 className="text-3xl font-bold text-slate-900 mb-2">Super Admin Portal</h1>
           <p className="text-slate-600">Secure access for administrators</p>
         </div>
