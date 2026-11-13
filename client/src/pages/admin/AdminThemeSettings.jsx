@@ -256,6 +256,10 @@ const AdminThemeSettings = () => {
 
       const { data } = await axios.put(`${config.API_URL}/api/theme`, form, authHeader)
       setForm(data)
+      try {
+        window.localStorage.removeItem("irhaas-theme-v2")
+        window.localStorage.removeItem("irhaas-theme-css-v2")
+      } catch {}
       setSuccess("Theme saved. Shoppers see it on their next page load.")
       setTimeout(() => setSuccess(""), 5000)
     } catch (err) {
@@ -278,6 +282,10 @@ const AdminThemeSettings = () => {
       setError("")
       const { data } = await axios.post(`${config.API_URL}/api/theme/reset`, {}, authHeader)
       setForm(data)
+      try {
+        window.localStorage.removeItem("irhaas-theme-v2")
+        window.localStorage.removeItem("irhaas-theme-css-v2")
+      } catch {}
       setSuccess("Theme reset to the original Irhaas colours.")
       setTimeout(() => setSuccess(""), 5000)
     } catch (err) {

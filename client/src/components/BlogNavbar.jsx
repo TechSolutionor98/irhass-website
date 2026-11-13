@@ -5,6 +5,7 @@ import { Link, useNavigate } from "react-router-dom"
 import { Search, Menu, X, ShoppingBag, LayoutGrid, ChevronRight, ChevronDown, ChevronLeft } from "lucide-react"
 import config from "../config/config"
 import { useLanguage } from "../context/LanguageContext"
+import { useTheme } from "../context/ThemeContext"
 import { getCategoryTreeCached } from "../services/categoryTreeCache"
 import { generateShopURL } from "../utils/urlUtils"
 
@@ -12,6 +13,7 @@ const API_BASE_URL = `${config.API_URL}`
 
 const Header = () => {
   const { getLocalizedPath, currentLanguage } = useLanguage()
+  const { logos } = useTheme() || {}
   const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState("")
   const [isMenuOpen, setIsMenuOpen] = useState(false)
@@ -403,7 +405,7 @@ const Header = () => {
               <Link to="/" className="inline-flex items-center">
                 {showLogo ? (
                   <img
-                    src="/logo.png"
+                    src={logos?.headerMobile || "/logo-wide.png?v=20261112e"}
                     alt="Irha's Wardrobe logo"
                     className="h-11 w-auto object-contain"
                     onError={() => setShowLogo(false)}
@@ -467,7 +469,7 @@ const Header = () => {
             <Link to="/" className="flex items-center space-x-2 justify-self-start">
               {showLogo ? (
                 <img
-                  src="/logo.png"
+                  src={logos?.headerDesktop || "/logo-wide.png?v=20261112e"}
                   alt="Irha's Wardrobe logo"
                   className="h-16 xl:h-20 w-auto object-contain"
                   onError={() => setShowLogo(false)}

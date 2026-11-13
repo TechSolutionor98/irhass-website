@@ -6,6 +6,7 @@ import { Facebook, Instagram, Linkedin, ChevronRight } from "lucide-react"
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome"
 import { faTiktok, faYoutube, faXTwitter } from "@fortawesome/free-brands-svg-icons"
 import { useLanguage } from "../context/LanguageContext"
+import { useTheme } from "../context/ThemeContext"
 import NewsletterModal from "./NewsletterModal"
 import TranslatedText from "./TranslatedText"
 
@@ -41,6 +42,7 @@ const SOCIALS = [
 
 const Footer = ({ className = "" }) => {
   const { getLocalizedPath } = useLanguage()
+  const { logos } = useTheme() || {}
   const [newsletterEmail, setNewsletterEmail] = useState("")
   const [showNewsletterModal, setShowNewsletterModal] = useState(false)
 
@@ -99,6 +101,25 @@ const Footer = ({ className = "" }) => {
           <NewsletterModal email={newsletterEmail} onClose={() => setShowNewsletterModal(false)} />
         )}
       </section>
+
+      {/* Footer Brand Logo */}
+      {logos?.footer && (
+        <div className="flex justify-center pt-8 pb-1">
+          <Link to={getLocalizedPath("/")} className="inline-flex items-center" aria-label="Irha's Wardrobe">
+            <img
+              src={logos.footer}
+              alt={logos.altText || "Irha's Wardrobe"}
+              className="h-10 sm:h-12 w-auto object-contain transition-transform duration-200 hover:scale-105"
+              style={{ maxWidth: logos.footerWidth ? `${Math.max(logos.footerWidth, 120)}px` : "160px" }}
+              onError={(e) => {
+                if (!e.currentTarget.src.includes("/logo.png")) {
+                  e.currentTarget.src = "/logo.png"
+                }
+              }}
+            />
+          </Link>
+        </div>
+      )}
 
       {/* Primary links */}
       <nav className="px-4 pt-12 sm:px-6" aria-label="Footer">

@@ -32,13 +32,22 @@ import {
  *    defaults in place rather than an unstyled page.
  */
 
-const CACHE_KEY = "grabatoz-theme-v1"
+const CACHE_KEY = "irhaas-theme-v2"
 // The same palette as ready-made CSS text, read by the pre-paint script in
-// index.html so the first frame is already themed.
-const CSS_CACHE_KEY = "grabatoz-theme-css-v1"
-// Long enough that the theme is not re-fetched on every route change, short
-// enough that an admin's change shows up for existing visitors the same day.
-const CACHE_TTL_MS = 30 * 60 * 1000
+// app.html so the first frame is already themed.
+const CSS_CACHE_KEY = "irhaas-theme-css-v2"
+// Cache buster for static brand assets (logos, favicons) to defeat 30-day edge/browser cache
+const ASSET_CACHE_BUST = "v=20261112e"
+
+const withAssetCacheBuster = (url) => {
+  if (!url || typeof url !== "string") return url
+  if (url.includes("v=")) return url
+  const sep = url.includes("?") ? "&" : "?"
+  return `${url}${sep}${ASSET_CACHE_BUST}`
+}
+// Cache for 60 seconds so changes made in admin appearance show up almost immediately
+// without fetching on every single navigation.
+const CACHE_TTL_MS = 60 * 1000
 
 const ThemeContext = createContext(null)
 
@@ -131,10 +140,10 @@ export const ThemeProvider = ({ children }) => {
     const raw = resolved.logos || {}
     return {
       ...raw,
-      headerDesktop: getFullImageUrl(raw.headerDesktop),
-      headerMobile: getFullImageUrl(raw.headerMobile),
-      footer: getFullImageUrl(raw.footer),
-      favicon: getFullImageUrl(raw.favicon),
+      headerDesktop: withAssetCacheBuster(getFullImageUrl(raw.headerDesktop)),
+      headerMobile: withAssetCacheBuster(getFullImageUrl(raw.headerMobile)),
+      footer: withAssetCacheBuster(getFullImageUrl(raw.footer)),
+      favicon: withAssetCacheBuster(getFullImageUrl(raw.favicon)),
     }
   }, [resolved.logos])
 
@@ -155,6 +164,7 @@ export const ThemeProvider = ({ children }) => {
     // The pre-paint block has done its job; drop it so it can never outlive a
     // reset-to-defaults.
     document.getElementById("grabatoz-theme-preload")?.remove()
+    document.getElementById("irhaas-theme-preload")?.remove()
   }, [resolved, logos, themed])
 
   const value = useMemo(

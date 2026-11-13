@@ -6,12 +6,14 @@ import axios from 'axios';
 import config from '../config/config';
 import { getFullImageUrl } from '../utils/imageUtils';
 import { useLanguage } from '../context/LanguageContext';
+import { useTheme } from '../context/ThemeContext';
 import TranslatedText from './TranslatedText';
 
 const API_BASE_URL = `${config.API_URL}`;
 
 const Footer = () => {
   const { getLocalizedPath, isArabic } = useLanguage();
+  const { logos } = useTheme() || {};
   const [editorsPick, setEditorsPick] = useState([]);
   const [randomPosts, setRandomPosts] = useState([]);
   const [popularCategories, setPopularCategories] = useState([]);
@@ -232,12 +234,17 @@ const Footer = () => {
         {/* Brand Spotlight */}
         <div className="border-t border-gray-800 mt-12 pt-5 text-center">
           <div className="flex flex-col items-center gap-5">
-            {/* Logo (replace src with V Perfumes white logo path) */}
+            {/* Logo */}
             <img
-              src="/logo.png"
+              src={logos?.footer || "/logo.png?v=20261112e"}
               alt="Irha's Wardrobe Logo"
               className="h-14 w-auto bg-white/95 px-4 py-2 rounded-lg shadow-sm"
               loading="lazy"
+              onError={(e) => {
+                if (!e.currentTarget.src.includes("/logo.png")) {
+                  e.currentTarget.src = "/logo.png"
+                }
+              }}
             />
 
             <p className="text-sm md:text-base text-gray-300 max-w-3xl leading-relaxed">

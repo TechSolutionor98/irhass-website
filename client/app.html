@@ -44,10 +44,10 @@
   (function () {
     try {
       if (window.__irhaasInternalPage) return
-      var css = window.localStorage.getItem("grabatoz-theme-css-v1")
+      var css = window.localStorage.getItem("irhaas-theme-css-v2")
       if (!css) return
       var style = document.createElement("style")
-      style.id = "grabatoz-theme-preload"
+      style.id = "irhaas-theme-preload"
       style.textContent = ":root{" + css + "}"
       document.head.appendChild(style)
     } catch (e) {

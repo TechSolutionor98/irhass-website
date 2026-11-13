@@ -39,6 +39,14 @@ import {
 import axios from "axios"
 import { getCategoryTreeCached } from "../services/categoryTreeCache"
 
+const LOGO_VERSION_BUST = "v=20261112e"
+const getFreshLogoUrl = (url) => {
+  if (!url || typeof url !== "string") return `/logo-wide.png?${LOGO_VERSION_BUST}`
+  if (url.includes("v=")) return url
+  const sep = url.includes("?") ? "&" : "?"
+  return `${url}${sep}${LOGO_VERSION_BUST}`
+}
+
 // Recursive component for mobile subcategory rendering
 const MobileSubCategoryItem = ({ 
   subCategory, 
@@ -246,6 +254,8 @@ const Navbar = () => {
   const [level3Dir, setLevel3Dir] = useState('right')
   const [level4Dir, setLevel4Dir] = useState('right')
   const [activeCategoryRect, setActiveCategoryRect] = useState(null)
+  const desktopLogoRef = useRef(null)
+  const desktopNavRowRef = useRef(null)
   const megaContentRef = useRef(null)
   const [megaScrollState, setMegaScrollState] = useState({ canScrollLeft: false, canScrollRight: false })
   const MEGA_LABEL_LIMIT_CLASS = "whitespace-normal break-words //max-w-[23ch]"
@@ -298,38 +308,27 @@ const Navbar = () => {
   }
 
   const getCategoryDropdownStyle = (rect) => {
-    if (!rect) return {}
-    const viewportWidth = typeof window !== "undefined" ? window.innerWidth : DESKTOP_MAX_CONTAINER_WIDTH
-    const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 1080
-    
-    // Calculate padding based on screen size (matching the slider container)
-    let horizontalPadding = 16 // Default: px-4 (4 * 4 = 16px on each side)
-    if (viewportWidth >= 1536) {
-      horizontalPadding = 48 // 2xl:px-12 (12 * 4 = 48px)
-    } else if (viewportWidth >= 1280) {
-      horizontalPadding = 32 // xl:px-8 (8 * 4 = 32px)
+    const dropdownTop = rect ? rect.bottom + 2 : 74
+    const rowRect = desktopNavRowRef.current?.getBoundingClientRect()
+    const rawLeft = rect?.rowLeft ?? (rowRect ? Math.round(rowRect.left) : null)
+    const rawWidth = rect?.rowWidth ?? (rowRect ? Math.round(rowRect.width) : null)
+
+    if (rawLeft !== null && rawWidth !== null) {
+      return {
+        left: `${rawLeft}px`,
+        top: `${dropdownTop}px`,
+        width: `${rawWidth}px`,
+        maxWidth: `${rawWidth}px`,
+        height: "400px",
+      }
     }
-    
-    // The navbar container has max-w-[1360px] and is centered
-    const maxContainerWidth = DESKTOP_MAX_CONTAINER_WIDTH
-    const containerWidth = Math.min(viewportWidth, maxContainerWidth)
-    
-    // Calculate centering offset when viewport is wider than max container
-    const containerOffset = viewportWidth > maxContainerWidth 
-      ? (viewportWidth - maxContainerWidth) / 2 
-      : 0
-    
-    // Match the slider container width exactly (container width minus padding)
-    const dropdownWidth = containerWidth - (horizontalPadding * 2)
-    const dropdownLeft = containerOffset + horizontalPadding
-    
-    // Use rect.bottom to position below the category bar, ensuring no overlap
-    const dropdownTop = rect.bottom + 2
-    
+
     return {
-      left: `${dropdownLeft}px`,
+      left: "50%",
+      transform: "translateX(-50%)",
       top: `${dropdownTop}px`,
-      width: `${dropdownWidth}px`,
+      width: "min(calc(100vw - 64px), 1280px)",
+      maxWidth: "calc(100vw - 32px)",
       height: "400px",
     }
   }
@@ -875,49 +874,334 @@ const Navbar = () => {
   return (
     <>
       {/* Desktop Navbar - Hidden on Mobile */}
-      <header className="hidden md:block bg-header-bg text-header-text border-b border-page-border sticky top-0 z-50 w-full">
-        <div className="w-full max-w-[1360px] mx-auto">
-          {/* Row 1: utilities left, logo centred, actions right. The three columns are
-              equal-width so the logo sits on the true centre of the header regardless of
-              how wide the side groups get. */}
-          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12 min-h-[76px] xl:min-h-[92px] py-2">
-            {/* Left column is deliberately empty so the logo reads as centred, matching
-                the reference header. Country, language, Refer & Earn and Download Our App
-                all moved into the account menu rather than being dropped. */}
-            <div aria-hidden="true" />
+      <header className="hidden md:block bg-header-bg text-header-text border-b border-page-border sticky top-0 z-50 w-full shadow-sm">
+        <div className="w-full max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10">
+          <div ref={desktopNavRowRef} className="flex items-center justify-between gap-4 xl:gap-6 min-h-[72px] xl:min-h-[82px] py-1.5">
+            {/* 1. Left: Logo + Categories inline */}
+            <div className="flex items-center gap-6 xl:gap-8 flex-1 min-w-0">
+              {/* Logo */}
+              <Link ref={desktopLogoRef} to={getLocalizedPath("/")} className="py-1 flex items-center flex-shrink-0" aria-label="Irha&rsquo;s Wardrobe home">
+                <img
+                  src={getFreshLogoUrl(logos.headerDesktop || "/logo-wide.png")}
+                  alt={logos.altText || "Logo"}
+                  width="240"
+                  height="54"
+                  className="h-[44px] lg:h-[48px] xl:h-[54px] w-auto max-h-[58px] object-contain transition-all duration-200"
+                  onError={(e) => {
+                    if (!e.currentTarget.src.includes("/logo-wide.png")) {
+                      e.currentTarget.src = "/logo-wide.png"
+                    }
+                  }}
+                />
+              </Link>
 
-            {/* Logo */}
-            <Link to={getLocalizedPath("/")} className="justify-self-center py-1 flex items-center" aria-label="Irha&rsquo;s Wardrobe home">
-              <img
-                src={logos.headerDesktop || "/logo-wide.png"}
-                alt={logos.altText || "Logo"}
-                width="320"
-                height="75"
-                className="h-[60px] lg:h-[70px] xl:h-[82px] w-auto max-h-[86px] object-contain transition-all duration-200"
-              />
-            </Link>
+              {/* Inline Categories */}
+              <nav className="flex items-center gap-6 xl:gap-8 flex-nowrap min-w-0 mt-1.5 lg:mt-2" aria-label="Primary Navigation">
+                {categories.slice(0, 8).map((parentCategory) => {
+                  const categorySubCategories = getSubCategoriesForCategory(parentCategory._id)
+                  const isActiveCategory = hoveredCategory === parentCategory._id
+                  return (
+                    <div
+                      key={parentCategory._id}
+                      className="relative flex items-center h-full py-2 cursor-pointer group"
+                      onMouseEnter={(e) => {
+                        if (categoryTimeoutRef.current) clearTimeout(categoryTimeoutRef.current)
+                        if (categoryOpenTimeoutRef.current) clearTimeout(categoryOpenTimeoutRef.current)
+                        const target = e.currentTarget
+                        categoryOpenTimeoutRef.current = setTimeout(() => {
+                          setHoveredCategory(parentCategory._id)
+                          const headerRect = target.closest("header")?.getBoundingClientRect()
+                          const rect = headerRect || target.getBoundingClientRect()
+                          const rowRect = desktopNavRowRef.current?.getBoundingClientRect()
+                          setActiveCategoryRect({
+                            top: rect.top,
+                            bottom: rect.bottom,
+                            left: rect.left,
+                            right: rect.right,
+                            width: rect.width,
+                            rowLeft: rowRect ? Math.round(rowRect.left) : null,
+                            rowWidth: rowRect ? Math.round(rowRect.width) : null,
+                          })
+                          categoryOpenTimeoutRef.current = null
+                        }, CATEGORY_OPEN_DELAY)
+                      }}
+                      onMouseLeave={() => {
+                        if (categoryOpenTimeoutRef.current) {
+                          clearTimeout(categoryOpenTimeoutRef.current)
+                          categoryOpenTimeoutRef.current = null
+                        }
+                        categoryTimeoutRef.current = setTimeout(() => {
+                          resetMegaMenu()
+                        }, 1000)
+                      }}
+                    >
+                      <Link
+                        to={generateShopURL({ parentCategory: getNodeIdentifier(parentCategory) })}
+                        className={`inline-flex items-center text-stone-800 hover:text-black font-semibold text-sm xl:text-[15px] tracking-wide whitespace-nowrap transition-colors relative py-1.5 ${
+                          isActiveCategory ? "text-black font-bold" : ""
+                        }`}
+                      >
+                        <TranslatedText text={parentCategory.name} sourceDoc={parentCategory} fieldName="name" />
+                        <span
+                          className={`absolute -bottom-1 left-0 right-0 h-[2px] bg-black rounded-full transition-all duration-200 ${
+                            isActiveCategory ? "opacity-100 scale-x-100" : "opacity-0 scale-x-0 group-hover:opacity-100 group-hover:scale-x-100"
+                          }`}
+                        />
+                      </Link>
 
-            <div className="flex items-center gap-6 xl:gap-7 justify-self-end">
-              {/* Search is an icon here; the full field drops down below the logo. */}
+                      {/* Mega menu panel */}
+                      {hoveredCategory === parentCategory._id && categorySubCategories.length > 0 && (
+                        <div
+                          className="fixed bg-nav-dropdown text-nav-dropdown-text mt-1 shadow-2xl rounded-lg p-5 z-[60] border border-page-border overflow-y-auto"
+                          role="menu"
+                          aria-label={`${parentCategory.name} menu`}
+                          style={getCategoryDropdownStyle(activeCategoryRect)}
+                          onMouseEnter={() => {
+                            if (categoryTimeoutRef.current) clearTimeout(categoryTimeoutRef.current)
+                          }}
+                          onMouseLeave={() => {
+                            categoryTimeoutRef.current = setTimeout(() => {
+                              resetMegaMenu()
+                            }, 300)
+                          }}
+                        >
+                          <div className="relative">
+                            {megaScrollState.canScrollLeft && (
+                              <button
+                                type="button"
+                                className="absolute left-0 top-1/2 -translate-y-1/2 bg-white border border-gray-200 rounded-full shadow-md w-8 h-8 flex items-center justify-center text-gray-700 hover:bg-gray-100"
+                                onClick={() => handleMegaScroll("left")}
+                                aria-label="Scroll menu left"
+                              >
+                                <ChevronLeft size={16} />
+                              </button>
+                            )}
+                            <div
+                              ref={megaContentRef}
+                              className="flex flex-nowrap items-start gap-4 overflow-x-auto hide-scrollbar px-6 py-2"
+                              onScroll={updateMegaScrollState}
+                            >
+                              {categorySubCategories.map((subCategory) => {
+                                const level2Subs = getChildSubCategories(subCategory._id)
+                                const LEVEL2_ITEMS_PER_COLUMN = 14
+                                const firstColumnLevel2 = level2Subs.slice(0, LEVEL2_ITEMS_PER_COLUMN)
+                                const moreLevel2Items = level2Subs.slice(LEVEL2_ITEMS_PER_COLUMN)
+                                const hasMoreLevel2 = moreLevel2Items.length > 0
+
+                                return (
+                                  <div key={subCategory._id} className="contents">
+                                    {/* Main Column */}
+                                    <div className="w-[150px] flex-shrink-0 flex flex-col gap-3">
+                                      <Link
+                                        to={generateShopURL({
+                                          parentCategory: getNodeIdentifier(parentCategory),
+                                          subcategory: getNodeIdentifier(subCategory),
+                                        })}
+                                        className={`block text-red-600 text-xs font-semibold hover:text-red-600 ${MEGA_LABEL_LIMIT_CLASS}`}
+                                        onClick={() => resetMegaMenu()}
+                                      >
+                                        <TranslatedText text={subCategory.name} sourceDoc={subCategory} fieldName="name" />
+                                      </Link>
+                                      <ul className="flex flex-col gap-1 px-1 pb-1 bg-transparent border-none text-left">
+                                        {firstColumnLevel2.map((sub2) => (
+                                          <li key={sub2._id} className="bg-transparent border-none p-0 m-0">
+                                            <Link
+                                              to={generateShopURL({
+                                                parentCategory: getNodeIdentifier(parentCategory),
+                                                subcategory: getNodeIdentifier(subCategory),
+                                                subcategory2: getNodeIdentifier(sub2),
+                                              })}
+                                              className={`block w-full text-xs text-gray-700 hover:text-red-600 hover:underline leading-snug ${MEGA_LABEL_LIMIT_CLASS}`}
+                                              onClick={() => resetMegaMenu()}
+                                            >
+                                              <span className="flex-1 break-words leading-snug text-left">
+                                                <TranslatedText text={sub2.name} sourceDoc={sub2} fieldName="name" />
+                                              </span>
+                                            </Link>
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+
+                                    {/* More Column */}
+                                    {hasMoreLevel2 && (
+                                      <div className="w-[150px] flex-shrink-0 flex flex-col gap-3">
+                                        <div className={`block text-lime-600 text-xs font-bold uppercase tracking-wide ${MEGA_LABEL_LIMIT_CLASS}`}>
+                                          More
+                                        </div>
+                                        <ul className="flex flex-col gap-1 px-1 pb-1 bg-transparent border-none text-left">
+                                          {moreLevel2Items.map((sub2) => (
+                                            <li key={sub2._id} className="bg-transparent border-none p-0 m-0">
+                                              <Link
+                                                to={generateShopURL({
+                                                  parentCategory: getNodeIdentifier(parentCategory),
+                                                  subcategory: getNodeIdentifier(subCategory),
+                                                  subcategory2: getNodeIdentifier(sub2),
+                                                })}
+                                                className={`block w-full text-xs text-gray-700 hover:text-red-600 hover:underline leading-snug ${MEGA_LABEL_LIMIT_CLASS}`}
+                                                onClick={() => resetMegaMenu()}
+                                              >
+                                                <span className="flex-1 break-words leading-snug text-left">
+                                                  <TranslatedText text={sub2.name} sourceDoc={sub2} fieldName="name" />
+                                                </span>
+                                              </Link>
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                            {megaScrollState.canScrollRight && (
+                              <button
+                                type="button"
+                                className="absolute right-0 top-1/2 -translate-y-1/2 bg-white border border-gray-200 rounded-full shadow-md w-8 h-8 flex items-center justify-center text-gray-700 hover:bg-gray-100"
+                                onClick={() => handleMegaScroll("right")}
+                                aria-label="Scroll menu right"
+                              >
+                                <ChevronRight size={16} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </nav>
+            </div>
+
+            {/* 2. Search Bar - shifted to the right, adjacent to user actions */}
+            <div className="w-[240px] lg:w-[280px] xl:w-[320px] flex-shrink-0 ml-auto mr-3 xl:mr-4 relative">
+              <form onSubmit={handleSearch} className="relative w-full">
+                <div className="relative flex items-center w-full bg-stone-50 border border-stone-300 rounded-xl px-3.5 py-2 text-sm text-stone-900 focus-within:border-stone-900 focus-within:bg-white focus-within:ring-1 focus-within:ring-stone-900 transition-all">
+                  <Search className="w-4 h-4 text-stone-400 mr-2.5 flex-shrink-0" strokeWidth={1.8} />
+                  <input
+                    type="text"
+                    placeholder={currentLanguage.code === "ar" ? "البحث عن المنتجات..." : "Search Products"}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full bg-transparent border-0 p-0 text-sm text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-0"
+                    ref={searchInputRef}
+                    onFocus={() => {
+                      if (searchResults.length > 0) setShowSearchDropdown(true)
+                    }}
+                  />
+                  {searchLoading && (
+                    <span className="flex items-center ml-2">
+                      <svg className="h-4 w-4 animate-spin text-stone-400" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                      </svg>
+                    </span>
+                  )}
+                </div>
+
+                {/* Autocomplete Dropdown */}
+                {showSearchDropdown && searchResults.length > 0 && (
+                  <div
+                    ref={searchDropdownRef}
+                    className="absolute left-0 right-0 z-50 mt-2 max-h-96 overflow-y-auto rounded-lg border border-stone-200 bg-white shadow-xl"
+                  >
+                    {searchResults.map((product) => (
+                      <Link
+                        key={product._id}
+                        to={getLocalizedPath(`/product/${encodeURIComponent(product.slug || product._id)}`)}
+                        className="flex items-start gap-4 px-4 py-3 hover:bg-gray-50 border-b last:border-b-0"
+                        onClick={() => setShowSearchDropdown(false)}
+                      >
+                        <img
+                          src={getOptimizedImageUrl(product.image, { width: 128, height: 128 }) || "/placeholder.svg"}
+                          alt={product.name}
+                          loading="lazy"
+                          decoding="async"
+                          width="64"
+                          height="64"
+                          className="w-14 h-14 object-contain rounded"
+                        />
+                        <div className="flex-1">
+                          <div className="font-semibold text-gray-900 text-sm line-clamp-2">
+                            <TranslatedText text={product.name} sourceDoc={product} fieldName="name" />
+                          </div>
+                          <div className="text-xs text-gray-500 line-clamp-2">
+                            <TranslatedText text={product.description} sourceDoc={product} fieldName="description" />
+                          </div>
+                        </div>
+                      </Link>
+                    ))}
+                    <Link
+                      to={getLocalizedPath(`/shop?search=${encodeURIComponent(searchQuery.trim())}`)}
+                      className="block text-center text-stone-800 font-semibold hover:underline py-2.5 text-xs uppercase tracking-wider bg-stone-50 hover:bg-stone-100 border-t border-stone-200"
+                      onClick={() => setShowSearchDropdown(false)}
+                    >
+                      View all results
+                    </Link>
+                  </div>
+                )}
+              </form>
+            </div>
+
+            {/* 3. Right: Wishlist | Cart | Profile / Login */}
+            <div className="flex items-center gap-2 xl:gap-3 flex-shrink-0">
+              {/* Wishlist */}
+              <Link
+                to={getLocalizedPath("/wishlist")}
+                className="flex flex-col items-center justify-center text-stone-700 hover:text-black px-2 py-1 transition group min-w-[56px]"
+                aria-label="Wishlist"
+              >
+                <div className="relative">
+                  <Heart className="w-5 h-5 text-stone-700 group-hover:text-black transition-colors" strokeWidth={1.6} />
+                  {wishlist.length > 0 && (
+                    <span className="absolute -top-1.5 -right-2.5 bg-black text-white text-[10px] rounded-full h-4 min-w-[16px] px-1 flex items-center justify-center font-bold">
+                      {wishlist.length}
+                    </span>
+                  )}
+                </div>
+                <span className="text-[11px] font-medium tracking-tight mt-1 text-stone-700 group-hover:text-black">
+                  <TranslatedText>Wishlist</TranslatedText>
+                </span>
+              </Link>
+
+              {/* Divider */}
+              <div className="h-6 w-px bg-stone-200" aria-hidden="true" />
+
+              {/* My Cart */}
               <button
                 type="button"
-                onClick={() => setIsDesktopSearchOpen((open) => !open)}
-                className="text-header-icon transition hover:text-brand-600"
-                aria-label="Search"
-                aria-expanded={isDesktopSearchOpen}
+                onClick={openCart}
+                className="flex flex-col items-center justify-center text-stone-700 hover:text-black px-2 py-1 transition group min-w-[56px]"
+                aria-label="Cart"
               >
-                <Search className="w-[22px] h-[22px]" strokeWidth={1.5} />
+                <div className="relative">
+                  <ShoppingBag className="w-5 h-5 text-stone-700 group-hover:text-black transition-colors" strokeWidth={1.6} />
+                  {cartCount > 0 && (
+                    <span className="absolute -top-1.5 -right-2.5 bg-black text-white text-[10px] rounded-full h-4 min-w-[16px] px-1 flex items-center justify-center font-bold">
+                      {cartCount}
+                    </span>
+                  )}
+                </div>
+                <span className="text-[11px] font-medium tracking-tight mt-1 text-stone-700 group-hover:text-black">
+                  <TranslatedText>My Cart</TranslatedText>
+                </span>
               </button>
 
-              {/* Account — icon + two-line label */}
+              {/* Divider */}
+              <div className="h-6 w-px bg-stone-200" aria-hidden="true" />
+
+              {/* Account / Login */}
               <div className="relative">
                 <button
                   onClick={() => setIsProfileOpen(!isProfileOpen)}
-                  className="flex items-center text-header-icon transition hover:text-brand-600"
+                  className="flex flex-col items-center justify-center text-stone-700 hover:text-black px-2 py-1 transition group min-w-[76px]"
                   ref={profileButtonRef}
                   aria-label={isAuthenticated ? "Account" : "Sign in"}
                 >
-                  <User className="w-[22px] h-[22px]" strokeWidth={1.5} />
+                  <User className="w-5 h-5 text-stone-700 group-hover:text-black transition-colors" strokeWidth={1.6} />
+                  <span className="text-[11px] font-medium tracking-tight mt-1 text-stone-700 group-hover:text-black whitespace-nowrap">
+                    {isAuthenticated ? (user?.name?.split(" ")[0] || "Account") : "Register / Login"}
+                  </span>
                 </button>
 
                 {isProfileOpen && (
@@ -996,492 +1280,10 @@ const Navbar = () => {
                   </div>
                 )}
               </div>
-
-
-              {/* Wishlist */}
-              <Link to={getLocalizedPath("/wishlist")} className="relative text-header-icon transition hover:text-brand-600" aria-label="Wishlist">
-                <Heart className="w-[22px] h-[22px]" strokeWidth={1.5} />
-                {wishlist.length > 0 && (
-                  <span className="absolute -top-1.5 -right-1.5 bg-header-badge text-header-badge-text text-[10px] rounded-full h-[18px] min-w-[18px] px-1 flex items-center justify-center font-bold">
-                    {wishlist.length}
-                  </span>
-                )}
-              </Link>
-
-              {/* Cart */}
-              <button
-                type="button"
-                onClick={openCart}
-                className="relative text-header-icon transition hover:text-brand-600"
-                aria-label="Cart"
-              >
-                <ShoppingBag className="w-[22px] h-[22px]" strokeWidth={1.5} />
-                {cartCount > 0 && (
-                  <span className="absolute -top-1.5 -right-1.5 bg-header-badge text-header-badge-text text-[10px] rounded-full h-[18px] min-w-[18px] px-1 flex items-center justify-center font-bold">
-                    {cartCount}
-                  </span>
-                )}
-              </button>
-            </div>
-          </div>
-
-          {/* Search row -- only rendered when the icon above is toggled on. */}
-          {isDesktopSearchOpen && (
-            <div className="bg-stone-100 px-4 py-4 sm:px-6">
-              <div className="mx-auto w-full max-w-[640px]">
-            <div>
-              <form onSubmit={handleSearch} className="relative">
-                <div className="">
-                  {/* A rule under the field rather than a box around it: the band already
-                      separates the row from the header, so a second border just boxes a box. */}
-                  <div className="flex items-center gap-5">
-                    <input
-                      type="text"
-                      placeholder={currentLanguage.code === "ar" ? "بحث" : "Search"}
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="min-w-0 flex-1 border-0 border-b border-stone-400 bg-transparent px-1 pb-1.5 text-base text-stone-900 placeholder:text-stone-500 focus:border-stone-900 focus:outline-none focus:ring-0"
-                      ref={searchInputRef}
-                      onFocus={() => {
-                        if (searchResults.length > 0) setShowSearchDropdown(true)
-                      }}
-                    />
-                    {/* Loading spinner */}
-                    {searchLoading && (
-                      <span className="flex items-center">
-                        <svg
-                          className="h-5 w-5 animate-spin text-stone-500"
-                          xmlns="http://www.w3.org/2000/svg"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                        >
-                          <circle
-                            className="opacity-25"
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            stroke="currentColor"
-                            strokeWidth="4"
-                          ></circle>
-                          <path
-                            className="opacity-75"
-                            fill="currentColor"
-                            d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-                          ></path>
-                        </svg>
-                      </span>
-                    )}
-                    <button
-                      type="submit"
-                      className="flex flex-shrink-0 items-center gap-1.5 text-base font-bold text-stone-900 transition-colors hover:text-brand-600"
-                    >
-                      <TranslatedText>Search</TranslatedText>
-                      <ChevronRight className="h-4 w-4" strokeWidth={2.2} />
-                    </button>
-                  </div>
-                  {/* Autocomplete Dropdown */}
-                  {showSearchDropdown && searchResults.length > 0 && (
-                    <div
-                      ref={searchDropdownRef}
-                      className="absolute left-0 right-0 z-50 mt-3 max-h-96 overflow-y-auto border border-stone-200 bg-white shadow-lg"
-                    >
-                      {searchResults.map((product) => (
-                        <Link
-                          key={product._id}
-                          to={getLocalizedPath(`/product/${encodeURIComponent(product.slug || product._id)}`)}
-                          className="flex items-start gap-4 px-4 py-3 hover:bg-gray-50 border-b last:border-b-0"
-                          onClick={() => setShowSearchDropdown(false)}
-                        >
-                          <img
-                            src={getOptimizedImageUrl(product.image, { width: 128, height: 128 }) || "/placeholder.svg"}
-                            alt={product.name}
-                            loading="lazy"
-                            decoding="async"
-                            width="64"
-                            height="64"
-                            className="w-16 h-16 object-contain rounded"
-                          />
-                          <div className="flex-1">
-                            <div className="font-semibold text-gray-900 text-sm line-clamp-2">
-                              <TranslatedText text={product.name} sourceDoc={product} fieldName="name" />
-                            </div>
-                            <div className="text-xs text-gray-500 line-clamp-2">
-                              <TranslatedText text={product.description} sourceDoc={product} fieldName="description" />
-                            </div>
-                          </div>
-                        </Link>
-                      ))}
-                      <Link
-                        to={getLocalizedPath(`/shop?search=${encodeURIComponent(searchQuery.trim())}`)}
-                        className="block text-center text-lime-600 hover:underline py-2 text-sm font-medium"
-                        onClick={() => setShowSearchDropdown(false)}
-                      >
-                        View all results
-                      </Link>
-                    </div>
-                  )}
-                </div>
-              </form>
-            </div>
-              </div>
-            </div>
-          )}
-
-          {/* Navigation Menu - Dynamic Categories with Dropdowns */}
-          <div className="bg-nav-bg text-nav-text border-t border-page-border mt-0 flex relative">
-          <div className="w-full">
-            <div className="flex items-center h-11 xl:h-12 2xl:h-14 px-4 xl:px-8 2xl:px-12 gap-2 xl:gap-2.5 2xl:gap-3">
-              {/* Toggle Button for All Categories */}
-              {/* display:none rather than unmounted, so the ref the click-outside handler
-                  uses stays attached, and the element takes no space in the flex row. */}
-              <div className={SHOW_ALL_CATEGORIES_MENU ? "relative" : "hidden"} ref={desktopCategoryDropdownRef}>
-                {SHOW_ALL_CATEGORIES_MENU && (
-                  <button
-                    type="button"
-                    onClick={toggleDesktopCategoryDropdown}
-                    className="hidden md:inline-flex items-center gap-2 px-3 xl:px-3.5 py-2 rounded-lg text-nav-text hover:text-nav-hover-text transition text-sm font-semibold whitespace-nowrap"
-                    aria-label="All categories"
-                  >
-                    <span className="text-xs xl:text-sm"><TranslatedText>All Categories</TranslatedText></span>
-                    <ChevronDown className="w-3.5 h-3.5" />
-                  </button>
-                )}
-                
-                {/* Desktop Category Dropdown (horizontal cascade) */}
-                {isDesktopCategoryDropdownOpen && (
-                  <div
-                    className="absolute left-0 top-full mt-2 bg-nav-dropdown text-nav-dropdown-text shadow-2xl rounded-lg z-[70] border border-page-border overflow-hidden max-w-[calc(100vw-32px)]"
-                    onMouseLeave={() => setDesktopCascadeIds([])}
-                  >
-                    <div className="flex max-h-[calc(100vh-160px)] overflow-x-auto">
-                      <div className="flex min-w-max">
-                        {/* Column 0: Parent Categories */}
-                        <div className="w-64 border-r border-gray-100 overflow-y-auto">
-                          <div className="p-2">
-                            {categories.map((parentCategory) => {
-                              const level1 = getSubCategoriesForCategory(parentCategory._id)
-                              const hasChildren = level1.length > 0
-                              const isActive = desktopCascadeIds[0] === parentCategory._id
-                              return (
-                                <Link
-                                  key={parentCategory._id}
-                                  to={generateShopURL({ parentCategory: getNodeIdentifier(parentCategory) })}
-                                  onMouseEnter={() => setDesktopCascadeIds([parentCategory._id])}
-                                  onClick={closeDesktopCategoryDropdown}
-                                  className={`flex items-center justify-between px-3 py-2.5 rounded-md text-sm font-semibold text-nav-dropdown-text hover:bg-nav-dropdown-hover hover:text-nav-dropdown-hover-text transition ${
-                                    isActive ? "bg-gray-50" : ""
-                                  }`}
-                                >
-                                  <span className="flex-1 pr-2"><TranslatedText text={parentCategory.name} sourceDoc={parentCategory} fieldName="name" /></span>
-                                  {hasChildren && <ChevronRight size={14} className="text-gray-400" />}
-                                </Link>
-                              )
-                            })}
-                          </div>
-                        </div>
-
-                        {(() => {
-                          const cols = []
-                          const activeParentId = desktopCascadeIds[0]
-                          if (!activeParentId) return null
-                          const parent = categories.find((c) => c._id === activeParentId)
-                          if (!parent) return null
-
-                          const buildParams = (chain) => {
-                            const params = { parentCategory: getNodeIdentifier(parent) }
-                            const keys = ["subcategory", "subcategory2", "subcategory3", "subcategory4"]
-                            for (let i = 0; i < Math.min(chain.length, keys.length); i++) {
-                              params[keys[i]] = chain[i]
-                            }
-                            return params
-                          }
-
-                          const getIdentifierById = (id) => {
-                            if (!id) return ""
-                            const stack = [...categories]
-                            const visited = new Set()
-                            while (stack.length) {
-                              const node = stack.pop()
-                              if (!node || visited.has(node._id)) continue
-                              visited.add(node._id)
-                              if (node._id === id) return getNodeIdentifier(node) || ""
-                              if (Array.isArray(node.children) && node.children.length) {
-                                stack.push(...node.children)
-                              }
-                            }
-                            return ""
-                          }
-
-                          const getItemsForLevel = (levelIndex) => {
-                            if (levelIndex === 1) return getSubCategoriesForCategory(activeParentId)
-                            const prevSelectedId = desktopCascadeIds[levelIndex - 1]
-                            if (!prevSelectedId) return []
-                            return getChildSubCategories(prevSelectedId)
-                          }
-
-                          for (let levelIndex = 1; levelIndex < 10; levelIndex++) {
-                            const items = getItemsForLevel(levelIndex)
-                            if (!Array.isArray(items) || items.length === 0) break
-                            cols.push(
-                              <div key={`col-${levelIndex}`} className="w-64 border-r border-gray-100 last:border-r-0 overflow-y-auto">
-                                <div className="p-2">
-                                  {items.map((node) => {
-                                    const hasNested = Array.isArray(node.children) && node.children.length > 0
-                                    const isActive = desktopCascadeIds[levelIndex] === node._id
-                                    const chainPrefix = desktopCascadeIds
-                                      .slice(1, levelIndex)
-                                      .map(getIdentifierById)
-                                      .filter(Boolean)
-                                    const params = buildParams([...chainPrefix, getNodeIdentifier(node)])
-                                    return (
-                                      <Link
-                                        key={node._id}
-                                        to={generateShopURL(params)}
-                                        onMouseEnter={() => {
-                                          setDesktopCascadeIds((prev) => {
-                                            const next = prev.slice(0, levelIndex)
-                                            next[levelIndex] = node._id
-                                            return next
-                                          })
-                                        }}
-                                        onClick={closeDesktopCategoryDropdown}
-                                        className={`flex items-center justify-between px-3 py-2.5 rounded-md text-sm text-nav-dropdown-text hover:bg-nav-dropdown-hover hover:text-nav-dropdown-hover-text transition ${
-                                          isActive ? "bg-gray-50" : ""
-                                        }`}
-                                      >
-                                        <span className="flex-1 pr-2"><TranslatedText text={node.name} sourceDoc={node} fieldName="name" /></span>
-                                        {hasNested && <ChevronRight size={14} className="text-gray-400" />}
-                                      </Link>
-                                    )
-                                  })}
-                                </div>
-                              </div>,
-                            )
-                          }
-                          return cols
-                        })()}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* The scroll arrows only exist when the row actually overflows. With a
-                  handful of categories they never appear; add enough to overflow and
-                  they come back on their own. */}
-              {categoryScrollState.canScrollPrev && (
-                <button
-                  type="button"
-                  onClick={scrollPrev}
-                  className="hidden md:inline-flex flex-shrink-0 items-center justify-center w-8 h-8 rounded-full bg-nav-btn text-nav-btn-text hover:opacity-80 transition"
-                  aria-label="Previous categories"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-              )}
-              <div className="flex-1 min-w-0">
-                <div
-                  ref={categoryScrollRef}
-                  className="flex items-center justify-center gap-7 xl:gap-9 px-2 overflow-x-auto hide-scrollbar scroll-smooth"
-                  onScroll={updateCategoryScrollState}
-                >
-                  {categories.map((parentCategory) => {
-                    const categorySubCategories = getSubCategoriesForCategory(parentCategory._id)
-                    const isActiveCategory = hoveredCategory === parentCategory._id
-                    return (
-                      <div
-                        key={parentCategory._id}
-                        className="relative flex items-center h-full flex-shrink-0 hover:bg-nav-hover transition-colors"
-                        onMouseEnter={(e) => {
-                          if (categoryTimeoutRef.current) {
-                            clearTimeout(categoryTimeoutRef.current)
-                          }
-                          if (categoryOpenTimeoutRef.current) {
-                            clearTimeout(categoryOpenTimeoutRef.current)
-                          }
-                          const target = e.currentTarget
-                          categoryOpenTimeoutRef.current = setTimeout(() => {
-                            setHoveredCategory(parentCategory._id)
-                            const rect = target.getBoundingClientRect()
-                            setActiveCategoryRect({
-                              top: rect.top,
-                              bottom: rect.bottom,
-                              left: rect.left,
-                              right: rect.right,
-                              width: rect.width,
-                            })
-                            categoryOpenTimeoutRef.current = null
-                          }, CATEGORY_OPEN_DELAY)
-                        }}
-                        onMouseLeave={() => {
-                          if (categoryOpenTimeoutRef.current) {
-                            clearTimeout(categoryOpenTimeoutRef.current)
-                            categoryOpenTimeoutRef.current = null
-                          }
-                          categoryTimeoutRef.current = setTimeout(() => {
-                            resetMegaMenu()
-                          }, 1000)
-                        }}
-                      >
-                        <Link
-                          to={generateShopURL({ parentCategory: getNodeIdentifier(parentCategory) })}
-                          className={`text-nav-text hover:text-nav-hover-text font-medium whitespace-nowrap text-[clamp(0.7rem,0.9vw,0.875rem)] px-1 py-2 text-center w-full leading-tight ${
-                            isActiveCategory ? "font-semibold" : ""
-                          }`}
-                        >
-                          <TranslatedText text={parentCategory.name} sourceDoc={parentCategory} fieldName="name" />
-                        </Link>
-                        {isActiveCategory && (
-                          <span className="pointer-events-none absolute bottom-0 left-1 right-1 h-1.5 rounded-full bg-nav-indicator shadow-sm" />
-                        )}
-                        {/* Mega menu panel: show all level-1 columns with their level-2 items at once */}
-                        {hoveredCategory === parentCategory._id && categorySubCategories.length > 0 && (
-                          <div
-                            className="fixed bg-nav-dropdown text-nav-dropdown-text mt-1 shadow-2xl rounded-lg p-5 z-[60] border border-page-border overflow-y-auto"
-                            role="menu"
-                            aria-label={`${parentCategory.name} menu`}
-                            style={{...getCategoryDropdownStyle(activeCategoryRect), maxWidth: 'calc(100vw - 32px)'}}
-                            onMouseEnter={() => {
-                              if (categoryTimeoutRef.current) clearTimeout(categoryTimeoutRef.current)
-                            }}
-                            onMouseLeave={() => {
-                              categoryTimeoutRef.current = setTimeout(() => {
-                                resetMegaMenu()
-                              }, 300)
-                            }}
-                          >
-                            <div className="relative">
-                              {megaScrollState.canScrollLeft && (
-                                <button
-                                  type="button"
-                                  className="absolute left-0 top-1/2 -translate-y-1/2 bg-white border border-gray-200 rounded-full shadow-md w-8 h-8 flex items-center justify-center text-gray-700 hover:bg-gray-100"
-                                  onClick={() => handleMegaScroll("left")}
-                                  aria-label="Scroll menu left"
-                                >
-                                  <ChevronLeft size={16} />
-                                </button>
-                              )}
-                              <div
-                                ref={megaContentRef}
-                                className="flex flex-nowrap items-start gap-4 overflow-x-auto hide-scrollbar px-6 py-2"
-                                onScroll={updateMegaScrollState}
-                              >
-                                {categorySubCategories.map((subCategory) => {
-                                  const level2Subs = getChildSubCategories(subCategory._id)
-                                  const LEVEL2_ITEMS_PER_COLUMN = 14
-                                  const firstColumnLevel2 = level2Subs.slice(0, LEVEL2_ITEMS_PER_COLUMN)
-                                  const moreLevel2Items = level2Subs.slice(LEVEL2_ITEMS_PER_COLUMN)
-                                  const hasMoreLevel2 = moreLevel2Items.length > 0
-                                  
-                                  return (
-                                    <div key={subCategory._id} className="contents">
-                                      {/* Main Column - First Level-2 items */}
-                                      <div className="w-[150px] flex-shrink-0 flex flex-col gap-3">
-                                        <Link
-                                          to={generateShopURL({
-                                            parentCategory: getNodeIdentifier(parentCategory),
-                                            subcategory: getNodeIdentifier(subCategory),
-                                          })}
-                                          className={`block text-red-600 text-xs font-semibold hover:text-red-600 ${MEGA_LABEL_LIMIT_CLASS}`}
-                                          onClick={() => resetMegaMenu()}
-                                        >
-                                          <TranslatedText text={subCategory.name} sourceDoc={subCategory} fieldName="name" />
-                                        </Link>
-                                        <ul className="flex flex-col gap-1 px-1 pb-1 bg-transparent border-none text-left">
-                                          {firstColumnLevel2.map((sub2) => {
-                                            const level3Subs = getChildSubCategories(sub2._id)
-                                            const hasLevel3 = Array.isArray(level3Subs) && level3Subs.length > 0
-                                            return (
-                                              <li
-                                                key={sub2._id}
-                                                className="bg-transparent border-none p-0 m-0"
-                                              >
-                                                <Link
-                                                  to={generateShopURL({
-                                                    parentCategory: getNodeIdentifier(parentCategory),
-                                                    subcategory: getNodeIdentifier(subCategory),
-                                                    subcategory2: getNodeIdentifier(sub2),
-                                                  })}
-                                                  className={`block w-full text-xs text-gray-700 hover:text-red-600 hover:underline leading-snug ${MEGA_LABEL_LIMIT_CLASS}`}
-                                                  onClick={() => resetMegaMenu()}
-                                                >
-                                                  <span className="flex-1 break-words leading-snug text-left"><TranslatedText text={sub2.name} sourceDoc={sub2} fieldName="name" /></span>
-                                                </Link>
-                                              </li>
-                                            )
-                                          })}
-                                        </ul>
-                                      </div>
-
-                                      {/* "More" Column - Remaining Level-2 items */}
-                                      {hasMoreLevel2 && (
-                                        <div className="w-[150px] flex-shrink-0 flex flex-col gap-3">
-                                          <div className={`block text-lime-600 text-xs font-bold uppercase tracking-wide ${MEGA_LABEL_LIMIT_CLASS}`}>
-                                            More
-                                          </div>
-                                          <ul className="flex flex-col gap-1 px-1 pb-1 bg-transparent border-none text-left">
-                                            {moreLevel2Items.map((sub2) => {
-                                              const level3Subs = getChildSubCategories(sub2._id)
-                                              const hasLevel3 = Array.isArray(level3Subs) && level3Subs.length > 0
-                                              return (
-                                                <li
-                                                  key={sub2._id}
-                                                  className="bg-transparent border-none p-0 m-0"
-                                                >
-                                                  <Link
-                                                    to={generateShopURL({
-                                                      parentCategory: getNodeIdentifier(parentCategory),
-                                                      subcategory: getNodeIdentifier(subCategory),
-                                                      subcategory2: getNodeIdentifier(sub2),
-                                                    })}
-                                                    className={`block w-full text-xs text-gray-700 hover:text-red-600 hover:underline leading-snug ${MEGA_LABEL_LIMIT_CLASS}`}
-                                                    onClick={() => resetMegaMenu()}
-                                                  >
-                                                    <span className="flex-1 break-words leading-snug text-left"><TranslatedText text={sub2.name} sourceDoc={sub2} fieldName="name" /></span>
-                                                  </Link>
-                                                </li>
-                                              )
-                                            })}
-                                          </ul>
-                                        </div>
-                                      )}
-                                    </div>
-                                  )
-                                })}
-                              </div>
-                              {megaScrollState.canScrollRight && (
-                                <button
-                                  type="button"
-                                  className="absolute right-0 top-1/2 -translate-y-1/2 bg-white border border-gray-200 rounded-full shadow-md w-8 h-8 flex items-center justify-center text-gray-700 hover:bg-gray-100"
-                                  onClick={() => handleMegaScroll("right")}
-                                  aria-label="Scroll menu right"
-                                >
-                                  <ChevronRight size={16} />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-              {categoryScrollState.canScrollNext && (
-                <button
-                  type="button"
-                  onClick={scrollNext}
-                  className="hidden md:inline-flex flex-shrink-0 items-center justify-center w-8 h-8 rounded-full bg-nav-btn text-nav-btn-text hover:opacity-80 transition"
-                  aria-label="Next categories"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              )}
             </div>
           </div>
         </div>
-      </div>
-    </header>
+      </header>
 
       {/* Mobile Navbar - Shown only on Mobile */}
       <header className="md:hidden bg-header-bg text-header-text shadow-sm sticky top-0 z-50">
@@ -1495,11 +1297,16 @@ const Navbar = () => {
           {/* Logo */}
           <Link to={getLocalizedPath("/")} className="flex items-center py-1">
             <img
-              src={logos.headerMobile || "/logo-wide.png"}
+              src={getFreshLogoUrl(logos.headerMobile || "/logo-wide.png")}
               alt={logos.altText || "Logo"}
               width="200"
               height="48"
               className="h-11 sm:h-12 w-auto max-w-[210px] sm:max-w-[240px] object-contain transition-all duration-200"
+              onError={(e) => {
+                if (!e.currentTarget.src.includes("/logo-wide.png")) {
+                  e.currentTarget.src = "/logo-wide.png"
+                }
+              }}
             />
           </Link>
 
