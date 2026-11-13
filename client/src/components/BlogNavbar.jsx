@@ -1,44 +1,55 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { Link, useNavigate } from "react-router-dom"
-import { Search, Menu, X, ShoppingBag, LayoutGrid, ChevronRight, ChevronDown, ChevronLeft } from "lucide-react"
+import { Link, useNavigate, useLocation } from "react-router-dom"
+import {
+  Search,
+  Menu,
+  X,
+  ShoppingBag,
+  Heart,
+  User,
+  ChevronDown,
+} from "lucide-react"
 import config from "../config/config"
 import { useLanguage } from "../context/LanguageContext"
 import { useTheme } from "../context/ThemeContext"
-import { getCategoryTreeCached } from "../services/categoryTreeCache"
-import { generateShopURL } from "../utils/urlUtils"
+import { useCart } from "../context/CartContext"
+import { useWishlist } from "../context/WishlistContext"
+import { useAuth } from "../context/AuthContext"
+import TranslatedText from "./TranslatedText"
 
 const API_BASE_URL = `${config.API_URL}`
 
-const Header = () => {
+const LOGO_VERSION_BUST = "v=20261112e"
+const getFreshLogoUrl = (url) => {
+  if (!url || typeof url !== "string") return `/logo-wide.png?${LOGO_VERSION_BUST}`
+  if (url.includes("v=")) return url
+  const sep = url.includes("?") ? "&" : "?"
+  return `${url}${sep}${LOGO_VERSION_BUST}`
+}
+
+const BlogNavbar = () => {
   const { getLocalizedPath, currentLanguage } = useLanguage()
   const { logos } = useTheme() || {}
+  const { cartCount, openCart } = useCart()
+  const { wishlist } = useWishlist()
+  const { isAuthenticated, user, logout } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+
   const [searchQuery, setSearchQuery] = useState("")
-  const [isMenuOpen, setIsMenuOpen] = useState(false)
-  const [showLogo, setShowLogo] = useState(true)
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false)
   const [blogCategories, setBlogCategories] = useState([])
-  const [shopCategories, setShopCategories] = useState([])
-  const [isBlogDropdownOpen, setIsBlogDropdownOpen] = useState(false)
-  const [isAllCategoriesDropdownOpen, setIsAllCategoriesDropdownOpen] = useState(false)
-  const [desktopCascadeIds, setDesktopCascadeIds] = useState([])
-  const [hoveredCategory, setHoveredCategory] = useState(null)
-  const [activeCategoryRect, setActiveCategoryRect] = useState(null)
-  const [expandedMobileNodes, setExpandedMobileNodes] = useState({})
-  const categoryScrollRef = useRef(null)
-  const [categoryScrollState, setCategoryScrollState] = useState({
-    canScrollPrev: false,
-    canScrollNext: false,
-  })
+  const [isTopicsDropdownOpen, setIsTopicsDropdownOpen] = useState(false)
+  const [isProfileOpen, setIsProfileOpen] = useState(false)
 
-  const blogDropdownRef = useRef(null)
-  const allCategoriesDropdownRef = useRef(null)
-  const categoryTimeoutRef = useRef(null)
-  const categoryOpenTimeoutRef = useRef(null)
+  const topicsDropdownRef = useRef(null)
+  const profileRef = useRef(null)
+  const profileButtonRef = useRef(null)
+  const searchInputRef = useRef(null)
 
-  const CATEGORY_OPEN_DELAY = 220
   const isArabic = currentLanguage?.code === "ar"
 
   const getDisplayName = (node) => {
@@ -48,838 +59,444 @@ const Header = () => {
   }
 
   useEffect(() => {
-    fetchNavbarData()
+    const fetchBlogCategories = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/blog-categories`)
+        const data = await res.json()
+        const categories = Array.isArray(data?.blogCategories)
+          ? data.blogCategories
+          : Array.isArray(data)
+            ? data
+            : []
+        setBlogCategories(categories)
+      } catch (err) {
+        console.error("Error fetching blog categories:", err)
+      }
+    }
+    fetchBlogCategories()
   }, [])
 
   useEffect(() => {
-    if (!isBlogDropdownOpen) return
-    const handleOutsideClick = (event) => {
-      if (!blogDropdownRef.current?.contains(event.target)) {
-        setIsBlogDropdownOpen(false)
+    const handleClickOutside = (e) => {
+      if (topicsDropdownRef.current && !topicsDropdownRef.current.contains(e.target)) {
+        setIsTopicsDropdownOpen(false)
+      }
+      if (
+        profileRef.current &&
+        !profileRef.current.contains(e.target) &&
+        profileButtonRef.current &&
+        !profileButtonRef.current.contains(e.target)
+      ) {
+        setIsProfileOpen(false)
       }
     }
-    document.addEventListener("mousedown", handleOutsideClick)
-    return () => document.removeEventListener("mousedown", handleOutsideClick)
-  }, [isBlogDropdownOpen])
-
-  useEffect(() => {
-    if (!isAllCategoriesDropdownOpen) return
-    const handleOutsideClick = (event) => {
-      if (!allCategoriesDropdownRef.current?.contains(event.target)) {
-        setIsAllCategoriesDropdownOpen(false)
-      }
-    }
-    document.addEventListener("mousedown", handleOutsideClick)
-    return () => document.removeEventListener("mousedown", handleOutsideClick)
-  }, [isAllCategoriesDropdownOpen])
-
-  useEffect(() => {
-    return () => {
-      if (categoryTimeoutRef.current) clearTimeout(categoryTimeoutRef.current)
-      if (categoryOpenTimeoutRef.current) clearTimeout(categoryOpenTimeoutRef.current)
-    }
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
-
-  const updateCategoryScrollState = () => {
-    const el = categoryScrollRef.current
-    if (!el) return
-
-    const maxScrollLeft = Math.max(0, el.scrollWidth - el.clientWidth)
-    const epsilon = 2
-    const canScrollPrev = el.scrollLeft > epsilon
-    const canScrollNext = el.scrollLeft < maxScrollLeft - epsilon
-
-    setCategoryScrollState((prev) => {
-      if (prev.canScrollPrev === canScrollPrev && prev.canScrollNext === canScrollNext) return prev
-      return { canScrollPrev, canScrollNext }
-    })
-  }
-
-  useEffect(() => {
-    updateCategoryScrollState()
-
-    const el = categoryScrollRef.current
-    if (!el) return
-
-    let resizeObserver
-    if (typeof ResizeObserver !== "undefined") {
-      resizeObserver = new ResizeObserver(() => updateCategoryScrollState())
-      resizeObserver.observe(el)
-    }
-
-    window.addEventListener("resize", updateCategoryScrollState)
-    const rafId = requestAnimationFrame(updateCategoryScrollState)
-
-    return () => {
-      if (resizeObserver) resizeObserver.disconnect()
-      window.removeEventListener("resize", updateCategoryScrollState)
-      cancelAnimationFrame(rafId)
-    }
-  }, [shopCategories])
-
-  const scrollPrev = () => {
-    if (!categoryScrollState.canScrollPrev) return
-    const el = categoryScrollRef.current
-    if (!el) return
-    const amount = Math.max(180, Math.round(el.clientWidth * 0.7))
-    el.scrollBy({ left: -amount, behavior: "smooth" })
-    resetMegaMenu()
-    requestAnimationFrame(updateCategoryScrollState)
-  }
-
-  const scrollNext = () => {
-    if (!categoryScrollState.canScrollNext) return
-    const el = categoryScrollRef.current
-    if (!el) return
-    const amount = Math.max(180, Math.round(el.clientWidth * 0.7))
-    el.scrollBy({ left: amount, behavior: "smooth" })
-    resetMegaMenu()
-    requestAnimationFrame(updateCategoryScrollState)
-  }
-
-  const fetchNavbarData = async () => {
-    try {
-      const [blogsResponse, categoriesResponse, categoryTree] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/blogs?status=published`),
-        fetch(`${API_BASE_URL}/api/blog-categories`),
-        getCategoryTreeCached(),
-      ])
-
-      const blogsData = await blogsResponse.json()
-      const blogCategoriesData = await categoriesResponse.json()
-      const blogs = Array.isArray(blogsData?.blogs) ? blogsData.blogs : Array.isArray(blogsData) ? blogsData : []
-      const allBlogCategories = Array.isArray(blogCategoriesData?.blogCategories)
-        ? blogCategoriesData.blogCategories
-        : Array.isArray(blogCategoriesData)
-          ? blogCategoriesData
-          : []
-
-      const categoryBlogs = {}
-      blogs.forEach((blog) => {
-        const categoryId =
-          blog.blogCategory?._id ||
-          blog.subCategory4?._id ||
-          blog.subCategory3?._id ||
-          blog.subCategory2?._id ||
-          blog.subCategory1?._id ||
-          blog.mainCategory?._id
-
-        if (categoryId && blog.slug) {
-          if (!categoryBlogs[categoryId]) categoryBlogs[categoryId] = []
-          categoryBlogs[categoryId].push(blog.slug)
-        }
-      })
-
-      const usedBlogCategories = allBlogCategories
-        .filter((category) => categoryBlogs[category._id]?.length)
-        .map((category) => {
-          const slugs = categoryBlogs[category._id]
-          const randomSlug = slugs[Math.floor(Math.random() * slugs.length)]
-          return { ...category, randomBlogSlug: randomSlug }
-        })
-
-      setBlogCategories(usedBlogCategories)
-      setShopCategories(Array.isArray(categoryTree) ? categoryTree : [])
-    } catch (error) {
-      console.error("Error fetching blog navbar data:", error)
-    }
-  }
 
   const handleSearch = (e) => {
     e.preventDefault()
     if (searchQuery.trim()) {
-      navigate(`/?search=${encodeURIComponent(searchQuery.trim())}`)
-      setSearchQuery("")
+      navigate(getLocalizedPath(`/blogs?search=${encodeURIComponent(searchQuery.trim())}`))
+      setIsMobileSearchOpen(false)
     }
-  }
-
-  const toggleMobileNode = (nodeId) => {
-    setExpandedMobileNodes((prev) => ({ ...prev, [nodeId]: !prev[nodeId] }))
-  }
-
-  const toggleDesktopCategoryDropdown = () => {
-    setIsAllCategoriesDropdownOpen((prev) => {
-      const next = !prev
-      if (next) setDesktopCascadeIds([])
-      return next
-    })
-    setHoveredCategory(null)
-    setActiveCategoryRect(null)
-  }
-
-  const closeDesktopCategoryDropdown = () => {
-    setIsAllCategoriesDropdownOpen(false)
-    setDesktopCascadeIds([])
-  }
-
-  const resetMegaMenu = () => {
-    setHoveredCategory(null)
-    setActiveCategoryRect(null)
-  }
-
-  const getSubCategoriesForCategory = (categoryId) => {
-    const category = shopCategories.find((item) => item._id === categoryId)
-    if (!category || !Array.isArray(category.children)) return []
-    return category.children.filter((child) => !child.level || child.level === 1)
-  }
-
-  const getChildSubCategories = (parentNodeId) => {
-    const stack = []
-    for (const category of shopCategories) {
-      if (Array.isArray(category.children)) stack.push(...category.children)
-    }
-    const visited = new Set()
-    while (stack.length) {
-      const node = stack.pop()
-      if (!node || visited.has(node._id)) continue
-      visited.add(node._id)
-      if (node._id === parentNodeId) {
-        return Array.isArray(node.children) ? node.children : []
-      }
-      if (Array.isArray(node.children) && node.children.length) {
-        stack.push(...node.children)
-      }
-    }
-    return []
-  }
-
-  const getNodeIdentifier = (nodeOrValue) => {
-    if (!nodeOrValue) return null
-    if (typeof nodeOrValue === "string") return nodeOrValue
-    return nodeOrValue.slug || nodeOrValue.name || nodeOrValue._id || null
-  }
-
-  const buildShopLink = (parentNodeOrIdentifier, subcategoryChain = []) => {
-    const params = { parentCategory: getNodeIdentifier(parentNodeOrIdentifier) }
-    if (subcategoryChain[0]) params.subcategory = subcategoryChain[0]
-    if (subcategoryChain[1]) params.subcategory2 = subcategoryChain[1]
-    if (subcategoryChain[2]) params.subcategory3 = subcategoryChain[2]
-    if (subcategoryChain[3]) params.subcategory4 = subcategoryChain[3]
-    return generateShopURL(params)
-  }
-
-  const getCategoryDropdownStyle = (rect) => {
-    if (!rect) return {}
-    const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 1920
-
-    let horizontalPadding = 16
-    if (viewportWidth >= 1536) {
-      horizontalPadding = 48
-    } else if (viewportWidth >= 1280) {
-      horizontalPadding = 40
-    } else if (viewportWidth >= 1024) {
-      horizontalPadding = 32
-    } else if (viewportWidth >= 640) {
-      horizontalPadding = 24
-    }
-
-    const maxContainerWidth = 1700
-    const containerWidth = Math.min(viewportWidth, maxContainerWidth)
-    const containerOffset = viewportWidth > maxContainerWidth ? (viewportWidth - maxContainerWidth) / 2 : 0
-    const dropdownWidth = containerWidth - horizontalPadding * 2
-    const dropdownLeft = containerOffset + horizontalPadding
-    const dropdownTop = rect.bottom + 2
-
-    return {
-      left: `${dropdownLeft}px`,
-      top: `${dropdownTop}px`,
-      width: `${dropdownWidth}px`,
-      height: "400px",
-    }
-  }
-
-  const renderNestedNodes = (nodes, parentNodeOrIdentifier, chain = [], level = 1) => {
-    if (!Array.isArray(nodes) || nodes.length === 0) return null
-
-    return (
-      <div className={`space-y-1 ${level > 1 ? "ml-3 border-l border-gray-100 pl-2" : ""}`}>
-        {nodes.map((node, index) => {
-          const nextChain = [...chain, getNodeIdentifier(node)]
-          const hasChildren = Array.isArray(node.children) && node.children.length > 0
-          const fallbackId = `${node.name || "node"}-${nextChain.join("-")}-${index}`
-          const nodeId = node._id || fallbackId
-          const isExpanded = Boolean(expandedMobileNodes[nodeId])
-
-          return (
-            <div key={nodeId}>
-              <div
-                className={`flex items-center justify-between gap-2 rounded-md px-3 py-2 hover:bg-gray-50 ${
-                  level <= 1 ? "text-sm" : "text-xs"
-                }`}
-              >
-                <Link
-                  to={buildShopLink(parentNodeOrIdentifier, nextChain)}
-                  onClick={() => {
-                    setIsMenuOpen(false)
-                  }}
-                  className="flex-1 font-medium text-gray-800"
-                >
-                  {getDisplayName(node)}
-                </Link>
-                {hasChildren && (
-                  <button
-                    type="button"
-                    aria-label={isExpanded ? "Collapse category" : "Expand category"}
-                    onClick={(e) => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      toggleMobileNode(nodeId)
-                    }}
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-lime-500 text-white hover:bg-lime-600"
-                  >
-                    {isExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-                  </button>
-                )}
-              </div>
-
-              {hasChildren && isExpanded && renderNestedNodes(node.children, parentNodeOrIdentifier, nextChain, level + 1)}
-            </div>
-          )
-        })}
-      </div>
-    )
-  }
-
-  const renderRootCategories = () => {
-    if (!Array.isArray(shopCategories) || shopCategories.length === 0) {
-      return <div className="px-3 py-2 text-sm text-gray-500">{isArabic ? "لا توجد فئات" : "No categories found"}</div>
-    }
-
-    return shopCategories.map((parentCategory, index) => {
-      const hasChildren = Array.isArray(parentCategory.children) && parentCategory.children.length > 0
-      const nodeId = parentCategory._id || `root-${parentCategory.name}-${index}`
-      const isExpanded = Boolean(expandedMobileNodes[nodeId])
-
-      return (
-        <div key={nodeId}>
-          <div className="flex items-center justify-between gap-2 rounded-md px-3 py-2 hover:bg-gray-50">
-            <Link
-              to={buildShopLink(parentCategory)}
-              onClick={() => {
-                setIsMenuOpen(false)
-              }}
-              className="flex-1 text-sm font-semibold text-gray-900"
-            >
-              {getDisplayName(parentCategory)}
-            </Link>
-            {hasChildren && (
-              <button
-                type="button"
-                aria-label={isExpanded ? "Collapse category" : "Expand category"}
-                onClick={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  toggleMobileNode(nodeId)
-                }}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-lime-500 text-white hover:bg-lime-600"
-              >
-                {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-              </button>
-            )}
-          </div>
-
-          {hasChildren && isExpanded && renderNestedNodes(parentCategory.children, parentCategory)}
-        </div>
-      )
-    })
   }
 
   return (
-    <header className="bg-white shadow-sm border-b border-gray-200 -mt-3 sm:pt-2 sticky -top-1 mb-2 z-50">
-      <div className="w-full">
-        <div className="w-full max-w-[1700px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
-          <div className="md:hidden grid grid-cols-3 items-center py-3">
-            <div className="pl-1">
-              <button
-                className="p-2 text-gray-700 hover:text-gray-900"
-                aria-label="Toggle categories"
-                onClick={() => {
-                  setIsMenuOpen((v) => !v)
-                  setIsMobileSearchOpen(false)
-                }}
-              >
-                {isMenuOpen ? <X size={22} /> : <Menu size={22} />}
-              </button>
-            </div>
-            <div className="flex items-center justify-center">
-              <Link to="/" className="inline-flex items-center">
-                {showLogo ? (
-                  <img
-                    src={logos?.headerMobile || "/logo-wide.png?v=20261112e"}
-                    alt="Irha's Wardrobe logo"
-                    className="h-11 w-auto object-contain"
-                    onError={() => setShowLogo(false)}
-                  />
-                ) : (
-                  <span className="text-lg font-bold text-gray-900">Irha&apos;s Wardrobe</span>
-                )}
-              </Link>
-            </div>
-            <div className="flex items-center justify-end pr-1 gap-1">
-              {!isMobileSearchOpen && (
-                <button
-                  className="p-2 text-gray-700 hover:text-gray-900"
-                aria-label={isArabic ? "بحث" : "Search"}
-                  onClick={() => {
-                    setIsMobileSearchOpen(true)
-                    setIsMenuOpen(false)
+    <>
+      {/* Desktop Blog Navbar - Hidden on Mobile */}
+      <header className="hidden md:block bg-header-bg text-header-text border-b border-page-border sticky top-0 z-50 w-full shadow-sm">
+        <div className="w-full max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10">
+          <div className="flex items-center justify-between gap-4 xl:gap-6 min-h-[72px] xl:min-h-[82px] py-1.5">
+            {/* 1. Left: Logo + Blog Navigation */}
+            <div className="flex items-center gap-6 xl:gap-8 flex-1 min-w-0">
+              {/* Logo */}
+              <Link to={getLocalizedPath("/")} className="py-1 flex items-center flex-shrink-0" aria-label="Irha&rsquo;s Wardrobe home">
+                <img
+                  src={getFreshLogoUrl(logos?.headerDesktop || "/logo-wide.png")}
+                  alt={logos?.altText || "Logo"}
+                  width="240"
+                  height="54"
+                  className="h-[44px] lg:h-[48px] xl:h-[54px] w-auto max-h-[58px] object-contain transition-all duration-200"
+                  onError={(e) => {
+                    if (!e.currentTarget.src.includes("/logo-wide.png")) {
+                      e.currentTarget.src = "/logo-wide.png"
+                    }
                   }}
-                >
-                  <Search size={22} />
-                </button>
-              )}
-              <Link to="https://www.irhaas.com/" target="_blank" aria-label={isArabic ? "تسوق الآن" : "Shop Now"} className="p-2 text-gray-700 hover:text-gray-900">
-                <ShoppingBag size={20} />
+                />
               </Link>
-            </div>
-          </div>
 
-          {isMobileSearchOpen && (
-            <div className="md:hidden pb-3">
-              <form onSubmit={handleSearch} className="w-full">
-                <div className="flex items-center bg-white rounded-md overflow-hidden">
-                  <input
-                    type="text"
-                    placeholder={isArabic ? "بحث" : "Search"}
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="flex-1 h-10 px-3 outline-none border border-lime-300"
-                    autoFocus
-                  />
-                  <div className="flex items-center h-10 mr-1 text-white">
-                    <button type="submit" aria-label={isArabic ? "بحث" : "Search"} className="h-10 w-10 flex items-center justify-center bg-lime-500 hover:bg-lime-600/90">
-                      <Search size={22} />
-                    </button>
-                    <span aria-hidden className="h-6 w-px" />
+              {/* Inline Blog Navigation */}
+              <nav className="flex items-center gap-5 xl:gap-6 flex-nowrap min-w-0 mt-1.5 lg:mt-2" aria-label="Blog Navigation">
+                {/* Store Link */}
+                <Link
+                  to={getLocalizedPath("/shop")}
+                  className="text-stone-700 hover:text-black font-semibold text-sm xl:text-[15px] tracking-wide whitespace-nowrap transition-colors py-1.5"
+                >
+                  <TranslatedText>Store</TranslatedText>
+                </Link>
+
+                {/* All Blogs Link */}
+                <Link
+                  to={getLocalizedPath("/blogs")}
+                  className={`text-stone-800 hover:text-black font-semibold text-sm xl:text-[15px] tracking-wide whitespace-nowrap transition-colors relative py-1.5 ${
+                    location.pathname === getLocalizedPath("/blogs") && !location.search ? "text-black font-bold" : ""
+                  }`}
+                >
+                  <span>{isArabic ? "كل المدونات" : "All Blogs"}</span>
+                  {location.pathname === getLocalizedPath("/blogs") && !location.search && (
+                    <span className="absolute -bottom-1 left-0 right-0 h-[2px] bg-black rounded-full" />
+                  )}
+                </Link>
+
+                {/* Blog Categories (Top 4) */}
+                {blogCategories.slice(0, 4).map((category) => {
+                  const categoryUrl = getLocalizedPath(`/blogs?category=${encodeURIComponent(category.slug || category._id)}`)
+                  const isActive = location.search.includes(category.slug || category._id)
+                  return (
+                    <Link
+                      key={category._id}
+                      to={categoryUrl}
+                      className={`text-stone-800 hover:text-black font-semibold text-sm xl:text-[15px] tracking-wide whitespace-nowrap transition-colors relative py-1.5 ${
+                        isActive ? "text-black font-bold" : ""
+                      }`}
+                    >
+                      <span>{getDisplayName(category)}</span>
+                      {isActive && (
+                        <span className="absolute -bottom-1 left-0 right-0 h-[2px] bg-black rounded-full" />
+                      )}
+                    </Link>
+                  )
+                })}
+
+                {/* Topics Dropdown (All Topics) */}
+                {blogCategories.length > 0 && (
+                  <div className="relative" ref={topicsDropdownRef}>
                     <button
                       type="button"
-                      aria-label={isArabic ? "إغلاق البحث" : "Close search"}
-                      onClick={() => setIsMobileSearchOpen(false)}
-                      className="h-10 w-10 flex items-center justify-center text-gray-500 hover:text-gray-700 ml-1"
+                      onClick={() => setIsTopicsDropdownOpen((v) => !v)}
+                      className="inline-flex items-center gap-1.5 text-stone-800 hover:text-black font-semibold text-sm xl:text-[15px] tracking-wide whitespace-nowrap transition-colors py-1.5"
                     >
-                      <X size={28} />
+                      <span>{isArabic ? "المواضيع" : "Topics"}</span>
+                      <ChevronDown
+                        size={15}
+                        className={`transition-transform duration-200 ${isTopicsDropdownOpen ? "rotate-180" : ""}`}
+                      />
                     </button>
+
+                    {isTopicsDropdownOpen && (
+                      <div className="absolute left-0 top-full mt-2 w-64 max-h-96 overflow-y-auto rounded-xl bg-white p-2 shadow-2xl ring-1 ring-black/5 z-50 border border-stone-200">
+                        <Link
+                          to={getLocalizedPath("/blogs")}
+                          className="block px-3.5 py-2.5 rounded-lg text-sm font-semibold text-stone-900 hover:bg-stone-100 transition-colors"
+                          onClick={() => setIsTopicsDropdownOpen(false)}
+                        >
+                          {isArabic ? "كل المدونات" : "All Blogs"}
+                        </Link>
+                        <div className="h-px bg-stone-100 my-1" />
+                        {blogCategories.map((category) => (
+                          <Link
+                            key={category._id}
+                            to={getLocalizedPath(`/blogs?category=${encodeURIComponent(category.slug || category._id)}`)}
+                            className="block px-3.5 py-2 rounded-lg text-sm text-stone-700 hover:text-black hover:bg-stone-50 transition-colors"
+                            onClick={() => setIsTopicsDropdownOpen(false)}
+                          >
+                            {getDisplayName(category)}
+                          </Link>
+                        ))}
+                      </div>
+                    )}
                   </div>
+                )}
+              </nav>
+            </div>
+
+            {/* 2. Center/Right: Blog Search Bar */}
+            <div className="w-[220px] lg:w-[260px] xl:w-[300px] flex-shrink-0 ml-auto mr-3 xl:mr-4 relative">
+              <form onSubmit={handleSearch} className="relative w-full">
+                <div className="relative flex items-center w-full bg-stone-50 border border-stone-300 rounded-xl px-3.5 py-2 text-sm text-stone-900 focus-within:border-stone-900 focus-within:bg-white focus-within:ring-1 focus-within:ring-stone-900 transition-all">
+                  <Search className="w-4 h-4 text-stone-400 mr-2.5 flex-shrink-0" strokeWidth={1.8} />
+                  <input
+                    type="text"
+                    placeholder={isArabic ? "البحث في المدونات..." : "Search blogs..."}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full bg-transparent border-0 p-0 text-sm text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-0"
+                    ref={searchInputRef}
+                  />
                 </div>
               </form>
             </div>
-          )}
 
-          <div className="hidden md:grid grid-cols-[auto,auto,minmax(0,1fr),auto,auto] items-center my-3 gap-4 min-h-[56px]">
-            <Link to="/" className="flex items-center space-x-2 justify-self-start">
-              {showLogo ? (
-                <img
-                  src={logos?.headerDesktop || "/logo-wide.png?v=20261112e"}
-                  alt="Irha's Wardrobe logo"
-                  className="h-16 xl:h-20 w-auto object-contain"
-                  onError={() => setShowLogo(false)}
-                />
-              ) : (
-                <h1 className="text-xl font-bold text-gray-900">Irha&apos;s Wardrobe</h1>
-              )}
-            </Link>
+            {/* 3. Right: Wishlist | Cart | Profile */}
+            <div className="flex items-center gap-2 xl:gap-3 flex-shrink-0">
+              {/* Wishlist */}
+              <Link
+                to={getLocalizedPath("/wishlist")}
+                className="flex flex-col items-center justify-center text-stone-700 hover:text-black px-2 py-1 transition group min-w-[56px]"
+                aria-label="Wishlist"
+              >
+                <div className="relative">
+                  <Heart className="w-5 h-5 text-stone-700 group-hover:text-black transition-colors" strokeWidth={1.6} />
+                  {wishlist?.length > 0 && (
+                    <span className="absolute -top-1.5 -right-2.5 bg-black text-white text-[10px] rounded-full h-4 min-w-[16px] px-1 flex items-center justify-center font-bold">
+                      {wishlist.length}
+                    </span>
+                  )}
+                </div>
+                <span className="text-[11px] font-medium tracking-tight mt-1 text-stone-700 group-hover:text-black">
+                  <TranslatedText>Wishlist</TranslatedText>
+                </span>
+              </Link>
 
-            <div className="relative flex items-center justify-center px-2" ref={blogDropdownRef}>
+              {/* Divider */}
+              <div className="h-6 w-px bg-stone-200" aria-hidden="true" />
+
+              {/* My Cart */}
               <button
                 type="button"
-                onClick={() => setIsBlogDropdownOpen((v) => !v)}
-                className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-md border border-gray-300 text-gray-700 text-center hover:border-lime-500 hover:text-lime-600"
+                onClick={openCart}
+                className="flex flex-col items-center justify-center text-stone-700 hover:text-black px-2 py-1 transition group min-w-[56px]"
+                aria-label="Cart"
               >
-                <span className="text-sm font-medium">{isArabic ? "المواضيع" : "Topics"}</span>
-                <ChevronDown size={16} className={isBlogDropdownOpen ? "rotate-180 transition-transform" : "transition-transform"} />
+                <div className="relative">
+                  <ShoppingBag className="w-5 h-5 text-stone-700 group-hover:text-black transition-colors" strokeWidth={1.6} />
+                  {cartCount > 0 && (
+                    <span className="absolute -top-1.5 -right-2.5 bg-black text-white text-[10px] rounded-full h-4 min-w-[16px] px-1 flex items-center justify-center font-bold">
+                      {cartCount}
+                    </span>
+                  )}
+                </div>
+                <span className="text-[11px] font-medium tracking-tight mt-1 text-stone-700 group-hover:text-black">
+                  <TranslatedText>My Cart</TranslatedText>
+                </span>
               </button>
 
-              {isBlogDropdownOpen && (
-                <div className="absolute left-0 top-full mt-2 min-w-56 max-h-96 overflow-y-auto rounded-md bg-white py-2 shadow-lg ring-1 ring-black/10 z-40">
-                  <Link
-                    to={getLocalizedPath("/blogs")}
-                    className="block px-4 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50"
-                    onClick={() => setIsBlogDropdownOpen(false)}
-                  >
-                    {isArabic ? "كل المدونات" : "All Blogs"}
-                  </Link>
-                  {blogCategories.map((category) => (
-                    <Link
-                      key={category._id}
-                      to={getLocalizedPath(`/blogs/${category.randomBlogSlug}`)}
-                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                      onClick={() => setIsBlogDropdownOpen(false)}
-                    >
-                      {getDisplayName(category)}
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </div>
+              {/* Divider */}
+              <div className="h-6 w-px bg-stone-200" aria-hidden="true" />
 
-            <form onSubmit={handleSearch} className="w-full max-w-[620px] justify-self-start">
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  placeholder={isArabic ? "بحث" : "Search"}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full h-12 px-4 border border-gray-300 focus:outline-none focus:ring-1 focus:ring-lime-500 focus:border-lime-500"
-                />
+              {/* Profile / Account */}
+              <div className="relative">
                 <button
-                  type="submit"
-                  aria-label={isArabic ? "بحث" : "Search"}
-                  className="h-12 w-14 bg-lime-500 text-white flex items-center justify-center hover:bg-lime-600 transition-colors"
+                  onClick={() => setIsProfileOpen(!isProfileOpen)}
+                  className="flex flex-col items-center justify-center text-stone-700 hover:text-black px-2 py-1 transition group min-w-[70px]"
+                  ref={profileButtonRef}
+                  aria-label={isAuthenticated ? "Account" : "Sign in"}
                 >
-                  <Search size={16} />
-                </button>
-              </div>
-            </form>
-
-            <Link
-              to="https://www.irhaas.com/"
-              target="_blank"
-              className="hidden md:flex items-center space-x-2 px-6 py-2 border hover:border-2 border-gray-300 hover:border-lime-300 text-black hover:bg-lime-500 hover:text-white transition-colors font-medium justify-self-end"
-            >
-              <ShoppingBag size={18} />
-              <span>{isArabic ? "تسوق الآن" : "Shop Now"}</span>
-            </Link>
-          </div>
-        </div>
-
-        <div className="hidden md:block bg-lime-500">
-          <div className="w-full max-w-[1700px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
-            <div className="grid grid-cols-[auto,auto,1fr,auto,auto] items-center h-10 xl:h-11 2xl:h-12 gap-2 xl:gap-2.5 2xl:gap-3">
-              <div className="relative flex-shrink-0" ref={allCategoriesDropdownRef}>
-                <button
-                  type="button"
-                  onClick={toggleDesktopCategoryDropdown}
-                  className="hidden md:inline-flex items-center gap-2 px-3 xl:px-3.5 py-2 rounded-lg text-white transition text-sm font-semibold whitespace-nowrap shadow-sm hover:bg-lime-600"
-                >
-                  <span>{isArabic ? "جميع الفئات" : "All Categories"}</span>
-                  <ChevronDown
-                    size={16}
-                    className={isAllCategoriesDropdownOpen ? "rotate-180 transition-transform" : "transition-transform"}
-                  />
+                  <User className="w-5 h-5 text-stone-700 group-hover:text-black transition-colors" strokeWidth={1.6} />
+                  <span className="text-[11px] font-medium tracking-tight mt-1 text-stone-700 group-hover:text-black whitespace-nowrap">
+                    {isAuthenticated ? (user?.name?.split(" ")[0] || "Account") : "Register / Login"}
+                  </span>
                 </button>
 
-                {isAllCategoriesDropdownOpen && (
+                {isProfileOpen && (
                   <div
-                    className="absolute left-0 top-full mt-2 bg-white shadow-2xl rounded-lg z-[70] border border-gray-200 overflow-hidden max-w-[calc(100vw-32px)]"
-                    onMouseLeave={() => setDesktopCascadeIds([])}
+                    ref={profileRef}
+                    className="absolute right-0 w-56 py-2 mt-2 bg-white text-stone-900 rounded-xl shadow-2xl z-50 border border-stone-200"
                   >
-                    <div className="flex max-h-[calc(100vh-160px)] overflow-x-auto hide-scrollbar">
-                      <div className="flex min-w-max">
-                        <div className="w-64 border-r border-gray-100 overflow-y-auto">
-                          <div className="p-2">
-                            {shopCategories.map((parentCategory) => {
-                              const level1 = getSubCategoriesForCategory(parentCategory._id)
-                              const hasChildren = level1.length > 0
-                              const isActive = desktopCascadeIds[0] === parentCategory._id
-                              return (
-                                <Link
-                                  key={parentCategory._id}
-                                  to={buildShopLink(parentCategory)}
-                                  onMouseEnter={() => setDesktopCascadeIds([parentCategory._id])}
-                                  onClick={closeDesktopCategoryDropdown}
-                                  className={`flex items-center justify-between px-3 py-2.5 rounded-md text-sm font-semibold text-gray-800 hover:bg-gray-100 transition ${
-                                    isActive ? "bg-gray-50" : ""
-                                  }`}
-                                >
-                                  <span className="flex-1 pr-2">{getDisplayName(parentCategory)}</span>
-                                  {hasChildren && <ChevronRight size={14} className="text-gray-400" />}
-                                </Link>
-                              )
-                            })}
-                          </div>
+                    {isAuthenticated ? (
+                      <>
+                        <div className="px-4 py-2 border-b border-stone-100">
+                          <p className="text-xs text-stone-500"><TranslatedText>Signed in as</TranslatedText></p>
+                          <p className="text-sm font-semibold truncate text-stone-900">{user?.name || user?.email}</p>
                         </div>
-
-                        {(() => {
-                          const columns = []
-                          const activeParentId = desktopCascadeIds[0]
-                          if (!activeParentId) return null
-                          const parentCategory = shopCategories.find((item) => item._id === activeParentId)
-                          if (!parentCategory) return null
-
-                          const buildParams = (chain) => {
-                            const params = { parentCategory: getNodeIdentifier(parentCategory) }
-                            const keys = ["subcategory", "subcategory2", "subcategory3", "subcategory4"]
-                            for (let i = 0; i < Math.min(chain.length, keys.length); i++) {
-                              params[keys[i]] = chain[i]
-                            }
-                            return params
-                          }
-
-                          const getIdentifierById = (id) => {
-                            if (!id) return ""
-                            const stack = [...shopCategories]
-                            const visited = new Set()
-                            while (stack.length) {
-                              const node = stack.pop()
-                              if (!node || visited.has(node._id)) continue
-                              visited.add(node._id)
-                              if (node._id === id) return getNodeIdentifier(node) || ""
-                              if (Array.isArray(node.children) && node.children.length) {
-                                stack.push(...node.children)
-                              }
-                            }
-                            return ""
-                          }
-
-                          const getItemsForLevel = (levelIndex) => {
-                            if (levelIndex === 1) return getSubCategoriesForCategory(activeParentId)
-                            const prevSelectedId = desktopCascadeIds[levelIndex - 1]
-                            if (!prevSelectedId) return []
-                            return getChildSubCategories(prevSelectedId)
-                          }
-
-                          for (let levelIndex = 1; levelIndex < 10; levelIndex++) {
-                            const items = getItemsForLevel(levelIndex)
-                            if (!Array.isArray(items) || items.length === 0) break
-
-                            columns.push(
-                              <div key={`col-${levelIndex}`} className="w-64 border-r border-gray-100 last:border-r-0 overflow-y-auto">
-                                <div className="p-2">
-                                  {items.map((node) => {
-                                    const hasNested = Array.isArray(node.children) && node.children.length > 0
-                                    const isActive = desktopCascadeIds[levelIndex] === node._id
-                                    const chainPrefix = desktopCascadeIds
-                                      .slice(1, levelIndex)
-                                      .map(getIdentifierById)
-                                      .filter(Boolean)
-
-                                    return (
-                                      <Link
-                                        key={node._id}
-                                        to={generateShopURL(buildParams([...chainPrefix, getNodeIdentifier(node)]))}
-                                        onMouseEnter={() => {
-                                          setDesktopCascadeIds((prev) => {
-                                            const next = prev.slice(0, levelIndex)
-                                            next[levelIndex] = node._id
-                                            return next
-                                          })
-                                        }}
-                                        onClick={closeDesktopCategoryDropdown}
-                                        className={`flex items-center justify-between px-3 py-2.5 rounded-md text-sm text-gray-700 hover:bg-gray-100 transition ${
-                                          isActive ? "bg-gray-50" : ""
-                                        }`}
-                                      >
-                                        <span className="flex-1 pr-2">{getDisplayName(node)}</span>
-                                        {hasNested && <ChevronRight size={14} className="text-gray-400" />}
-                                      </Link>
-                                    )
-                                  })}
-                                </div>
-                              </div>,
-                            )
-                          }
-
-                          return columns
-                        })()}
-                      </div>
-                    </div>
+                        <Link
+                          to={getLocalizedPath("/profile")}
+                          className="block px-4 py-2 text-sm text-stone-700 hover:bg-stone-50 hover:text-black"
+                          onClick={() => setIsProfileOpen(false)}
+                        >
+                          <TranslatedText>My Account</TranslatedText>
+                        </Link>
+                        <Link
+                          to={getLocalizedPath("/user-orders")}
+                          className="block px-4 py-2 text-sm text-stone-700 hover:bg-stone-50 hover:text-black"
+                          onClick={() => setIsProfileOpen(false)}
+                        >
+                          <TranslatedText>My Orders</TranslatedText>
+                        </Link>
+                        <button
+                          onClick={() => {
+                            logout()
+                            setIsProfileOpen(false)
+                          }}
+                          className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                        >
+                          <TranslatedText>Sign Out</TranslatedText>
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <Link
+                          to={getLocalizedPath("/login")}
+                          className="block px-4 py-2 text-sm text-stone-700 hover:bg-stone-50 hover:text-black"
+                          onClick={() => setIsProfileOpen(false)}
+                        >
+                          <TranslatedText>Sign In</TranslatedText>
+                        </Link>
+                        <Link
+                          to={getLocalizedPath("/register")}
+                          className="block px-4 py-2 text-sm text-stone-700 hover:bg-stone-50 hover:text-black"
+                          onClick={() => setIsProfileOpen(false)}
+                        >
+                          <TranslatedText>Create Account</TranslatedText>
+                        </Link>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
-
-              <button
-                type="button"
-                onClick={scrollPrev}
-                className="hidden md:inline-flex items-center justify-center w-8 h-8 xl:w-8.5 xl:h-8.5 2xl:w-9 2xl:h-9 rounded-full bg-white text-lime-500 hover:bg-gray-100 transition disabled:opacity-40 disabled:cursor-not-allowed"
-                disabled={!categoryScrollState.canScrollPrev}
-                aria-label="Previous categories"
-              >
-                <ChevronLeft className="w-4 h-4 xl:w-[17px] xl:h-[17px] 2xl:w-[18px] 2xl:h-[18px]" />
-              </button>
-
-              <nav ref={categoryScrollRef} onScroll={updateCategoryScrollState} className="flex-1 overflow-x-auto hide-scrollbar [scrollbar-width:none] scroll-smooth">
-                <ul className="flex items-center gap-4 px-2 whitespace-nowrap pr-2">
-                  {shopCategories.map((category, index) => {
-                    const categorySubCategories = getSubCategoriesForCategory(category._id)
-                    const isActiveCategory = hoveredCategory === category._id
-
-                    return (
-                      <li
-                        key={category._id || `desktop-cat-${category.name}-${index}`}
-                        className="relative flex items-center h-full flex-shrink-0"
-                        onMouseEnter={(event) => {
-                          if (categoryTimeoutRef.current) clearTimeout(categoryTimeoutRef.current)
-                          if (categoryOpenTimeoutRef.current) clearTimeout(categoryOpenTimeoutRef.current)
-                          setIsAllCategoriesDropdownOpen(false)
-                          setDesktopCascadeIds([])
-
-                          const target = event.currentTarget
-                          categoryOpenTimeoutRef.current = setTimeout(() => {
-                            setHoveredCategory(category._id)
-                            const rect = target.getBoundingClientRect()
-                            setActiveCategoryRect({
-                              top: rect.top,
-                              bottom: rect.bottom,
-                              left: rect.left,
-                              right: rect.right,
-                              width: rect.width,
-                            })
-                            categoryOpenTimeoutRef.current = null
-                          }, CATEGORY_OPEN_DELAY)
-                        }}
-                        onMouseLeave={() => {
-                          if (categoryOpenTimeoutRef.current) {
-                            clearTimeout(categoryOpenTimeoutRef.current)
-                            categoryOpenTimeoutRef.current = null
-                          }
-                          categoryTimeoutRef.current = setTimeout(() => {
-                            resetMegaMenu()
-                          }, 320)
-                        }}
-                      >
-                        <Link
-                          to={buildShopLink(category)}
-                          onClick={resetMegaMenu}
-                          className={`text-white hover:text-lime-100 font-medium text-sm py-2 ${
-                            isActiveCategory ? "font-semibold" : ""
-                          }`}
-                        >
-                          {getDisplayName(category)}
-                        </Link>
-                        {isActiveCategory && (
-                          <span className="pointer-events-none absolute bottom-0 left-0 right-0 h-1 rounded-full bg-white shadow-sm" />
-                        )}
-
-                        {isActiveCategory && categorySubCategories.length > 0 && (
-                          <div
-                            className="fixed bg-white mt-1 shadow-2xl rounded-lg p-5 z-[60] border border-gray-100 overflow-y-auto"
-                            role="menu"
-                            aria-label={`${getDisplayName(category)} menu`}
-                            style={{ ...getCategoryDropdownStyle(activeCategoryRect), maxWidth: "calc(100vw - 32px)" }}
-                            onMouseEnter={() => {
-                              if (categoryTimeoutRef.current) clearTimeout(categoryTimeoutRef.current)
-                            }}
-                            onMouseLeave={() => {
-                              categoryTimeoutRef.current = setTimeout(() => {
-                                resetMegaMenu()
-                              }, 220)
-                            }}
-                          >
-                            <div className="flex flex-nowrap items-start gap-4 overflow-x-auto hide-scrollbar px-2 py-2">
-                              {categorySubCategories.map((subCategory) => {
-                                const level2Subs = getChildSubCategories(subCategory._id)
-                                const level2ItemsPerColumn = 14
-                                const firstColumnLevel2 = level2Subs.slice(0, level2ItemsPerColumn)
-                                const moreLevel2Items = level2Subs.slice(level2ItemsPerColumn)
-                                const hasMoreLevel2 = moreLevel2Items.length > 0
-
-                                return (
-                                  <div key={subCategory._id} className="contents">
-                                    <div className="w-[160px] flex-shrink-0 flex flex-col gap-3">
-                                      <Link
-                                        to={buildShopLink(category, [getNodeIdentifier(subCategory)])}
-                                        className="block text-red-600 text-xs font-semibold hover:text-red-600"
-                                        onClick={resetMegaMenu}
-                                      >
-                                        {getDisplayName(subCategory)}
-                                      </Link>
-                                      <ul className="flex flex-col gap-1 px-1 pb-1 text-left">
-                                        {firstColumnLevel2.map((sub2) => (
-                                          <li key={sub2._id}>
-                                            <Link
-                                              to={buildShopLink(category, [getNodeIdentifier(subCategory), getNodeIdentifier(sub2)])}
-                                              className="block w-full text-xs text-gray-700 hover:text-red-600 hover:underline leading-snug"
-                                              onClick={resetMegaMenu}
-                                            >
-                                              {getDisplayName(sub2)}
-                                            </Link>
-                                          </li>
-                                        ))}
-                                      </ul>
-                                    </div>
-
-                                    {hasMoreLevel2 && (
-                                      <div className="w-[160px] flex-shrink-0 flex flex-col gap-3">
-                                        <div className="block text-lime-600 text-xs font-bold uppercase tracking-wide">{isArabic ? "المزيد" : "More"}</div>
-                                        <ul className="flex flex-col gap-1 px-1 pb-1 text-left">
-                                          {moreLevel2Items.map((sub2) => (
-                                            <li key={sub2._id}>
-                                              <Link
-                                                to={buildShopLink(category, [getNodeIdentifier(subCategory), getNodeIdentifier(sub2)])}
-                                                className="block w-full text-xs text-gray-700 hover:text-red-600 hover:underline leading-snug"
-                                                onClick={resetMegaMenu}
-                                              >
-                                                {getDisplayName(sub2)}
-                                              </Link>
-                                            </li>
-                                          ))}
-                                        </ul>
-                                      </div>
-                                    )}
-                                  </div>
-                                )
-                              })}
-                            </div>
-                          </div>
-                        )}
-                      </li>
-                    )
-                  })}
-                </ul>
-              </nav>
-
-              <button
-                type="button"
-                onClick={scrollNext}
-                className="hidden md:inline-flex items-center justify-center w-8 h-8 xl:w-8.5 xl:h-8.5 2xl:w-9 2xl:h-9 rounded-full bg-white text-lime-500 hover:bg-gray-100 transition disabled:opacity-40 disabled:cursor-not-allowed"
-                disabled={!categoryScrollState.canScrollNext}
-                aria-label="Next categories"
-              >
-                <ChevronRight className="w-4 h-4 xl:w-[17px] xl:h-[17px] 2xl:w-[18px] 2xl:h-[18px]" />
-              </button>
             </div>
           </div>
         </div>
+      </header>
 
-        {isMenuOpen && (
-          <div className="md:hidden fixed inset-0 z-50">
-            <div className="absolute inset-0 bg-black/40" onClick={() => setIsMenuOpen(false)} aria-hidden="true" />
+      {/* Mobile Blog Navbar - Shown only on Mobile */}
+      <header className="md:hidden bg-header-bg text-header-text shadow-sm sticky top-0 z-50">
+        <div className="flex items-center justify-between px-3 py-2 min-h-[56px]">
+          {/* Hamburger Menu Toggle */}
+          <button
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            className="p-1.5 text-stone-800 hover:text-black"
+            aria-label="Toggle menu"
+          >
+            {isMobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
+          </button>
 
-            <nav className="absolute top-0 left-0 h-full w-80 max-w-[85vw] bg-white shadow-xl flex flex-col">
-              <div className="flex items-center justify-between bg-lime-500 text-white h-12 w-full px-3">
+          {/* Logo */}
+          <Link to={getLocalizedPath("/")} className="flex items-center py-1">
+            <img
+              src={getFreshLogoUrl(logos?.headerMobile || "/logo-wide.png")}
+              alt={logos?.altText || "Logo"}
+              width="200"
+              height="48"
+              className="h-11 sm:h-12 w-auto max-w-[210px] sm:max-w-[240px] object-contain transition-all duration-200"
+              onError={(e) => {
+                if (!e.currentTarget.src.includes("/logo-wide.png")) {
+                  e.currentTarget.src = "/logo-wide.png"
+                }
+              }}
+            />
+          </Link>
+
+          {/* Mobile Right Actions */}
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setIsMobileSearchOpen(!isMobileSearchOpen)}
+              className="p-1.5 text-stone-800 hover:text-black"
+              aria-label="Search"
+            >
+              <Search size={20} />
+            </button>
+            <button
+              type="button"
+              onClick={openCart}
+              className="p-1.5 text-stone-800 hover:text-black relative"
+              aria-label="Cart"
+            >
+              <ShoppingBag size={20} />
+              {cartCount > 0 && (
+                <span className="absolute -top-1 -right-1 bg-black text-white text-[10px] rounded-full h-4 min-w-[16px] px-1 flex items-center justify-center font-bold">
+                  {cartCount}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Mobile Search Bar Dropdown */}
+        {isMobileSearchOpen && (
+          <div className="px-3 pb-3 pt-1 border-t border-stone-200 bg-white">
+            <form onSubmit={handleSearch} className="relative w-full">
+              <div className="relative flex items-center w-full bg-stone-50 border border-stone-300 rounded-xl px-3 py-2 text-sm text-stone-900">
+                <Search className="w-4 h-4 text-stone-400 mr-2 flex-shrink-0" />
+                <input
+                  type="text"
+                  placeholder={isArabic ? "البحث في المدونات..." : "Search blogs..."}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-transparent border-0 p-0 text-sm text-stone-900 placeholder:text-stone-400 focus:outline-none"
+                  autoFocus
+                />
                 <button
-                  onClick={() => {
-                    navigate(getLocalizedPath("/"))
-                    setIsMenuOpen(false)
-                  }}
-                  className="flex items-center gap-2"
+                  type="button"
+                  onClick={() => setIsMobileSearchOpen(false)}
+                  className="p-1 text-stone-400 hover:text-black ml-1"
                 >
-                  <LayoutGrid size={18} />
-                  <span className="font-xl text-lg">{isArabic ? "جميع الفئات" : "All Categories"}</span>
-                </button>
-                <button onClick={() => setIsMenuOpen(false)} aria-label="Close categories" className="text-white">
-                  <X size={22} />
+                  <X size={16} />
                 </button>
               </div>
+            </form>
+          </div>
+        )}
 
-              <div className="border-b border-gray-200 p-3">
-                <div className="text-sm font-semibold text-gray-800 mb-2">{isArabic ? "فئات المدونة" : "Blog Categories"}</div>
-                <div className="space-y-1 max-h-32 overflow-y-auto">
-                  <Link to={getLocalizedPath("/blogs")} onClick={() => setIsMenuOpen(false)} className="block text-sm px-2 py-1.5 rounded hover:bg-gray-50">
-                    {isArabic ? "كل المدونات" : "All Blogs"}
-                  </Link>
-                  {blogCategories.map((category) => (
+        {/* Mobile Menu Drawer */}
+        {isMobileMenuOpen && (
+          <div className="border-t border-stone-200 bg-white px-4 py-4 space-y-4 max-h-[calc(100vh-60px)] overflow-y-auto">
+            <nav className="space-y-1">
+              <Link
+                to={getLocalizedPath("/")}
+                className="block px-3 py-2.5 rounded-lg text-base font-semibold text-stone-900 hover:bg-stone-50"
+                onClick={() => setIsMobileMenuOpen(false)}
+              >
+                <TranslatedText>Store Home</TranslatedText>
+              </Link>
+              <Link
+                to={getLocalizedPath("/shop")}
+                className="block px-3 py-2.5 rounded-lg text-base font-semibold text-stone-900 hover:bg-stone-50"
+                onClick={() => setIsMobileMenuOpen(false)}
+              >
+                <TranslatedText>Shop All</TranslatedText>
+              </Link>
+              <Link
+                to={getLocalizedPath("/blogs")}
+                className="block px-3 py-2.5 rounded-lg text-base font-semibold text-stone-900 hover:bg-stone-50"
+                onClick={() => setIsMobileMenuOpen(false)}
+              >
+                {isArabic ? "كل المدونات" : "All Blogs"}
+              </Link>
+            </nav>
+
+            {blogCategories.length > 0 && (
+              <div className="pt-2 border-t border-stone-100">
+                <p className="px-3 text-xs font-bold uppercase tracking-wider text-stone-400 mb-2">
+                  {isArabic ? "المواضيع" : "Blog Topics"}
+                </p>
+                <div className="space-y-1">
+                  {blogCategories.map((cat) => (
                     <Link
-                      key={category._id}
-                      to={getLocalizedPath(`/blogs/${category.randomBlogSlug}`)}
-                      onClick={() => setIsMenuOpen(false)}
-                      className="block text-sm px-2 py-1.5 rounded hover:bg-gray-50"
+                      key={cat._id}
+                      to={getLocalizedPath(`/blogs?category=${encodeURIComponent(cat.slug || cat._id)}`)}
+                      className="block px-3 py-2 rounded-lg text-sm text-stone-700 hover:text-black hover:bg-stone-50"
+                      onClick={() => setIsMobileMenuOpen(false)}
                     >
-                      {getDisplayName(category)}
+                      {getDisplayName(cat)}
                     </Link>
                   ))}
                 </div>
               </div>
+            )}
 
-              <div className="flex-1 overflow-y-auto p-2">
-                <div className="space-y-1">{renderRootCategories()}</div>
-              </div>
-            </nav>
+            <div className="pt-2 border-t border-stone-100 space-y-1">
+              <Link
+                to={getLocalizedPath("/wishlist")}
+                className="block px-3 py-2 rounded-lg text-sm text-stone-700 hover:text-black hover:bg-stone-50"
+                onClick={() => setIsMobileMenuOpen(false)}
+              >
+                <TranslatedText>Wishlist</TranslatedText>
+              </Link>
+              <Link
+                to={getLocalizedPath(isAuthenticated ? "/profile" : "/login")}
+                className="block px-3 py-2 rounded-lg text-sm text-stone-700 hover:text-black hover:bg-stone-50"
+                onClick={() => setIsMobileMenuOpen(false)}
+              >
+                <TranslatedText>{isAuthenticated ? "My Account" : "Register / Login"}</TranslatedText>
+              </Link>
+            </div>
           </div>
         )}
-      </div>
-    </header>
+      </header>
+    </>
   )
 }
 
-export default Header
+export default BlogNavbar
