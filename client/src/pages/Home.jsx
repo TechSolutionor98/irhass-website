@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useMemo } from "react"
 import axios from "axios"
 import { generateShopURL } from "../utils/urlUtils"
-import { getFullImageUrl } from "../utils/imageUtils"
+import { getFullImageUrl, getOptimizedImageUrl } from "../utils/imageUtils"
 import { resolveProductCategoryInfo } from "../utils/productCategory"
 
 import {
@@ -1026,7 +1026,7 @@ const DynamicBrandProductCard = ({ product }) => {
       <div className="relative mb-2 flex justify-center items-center" style={{ height: 190 }}>
         <Link to={getLocalizedPath(`/product/${encodeURIComponent(product.slug || product._id)}`)} className="w-full h-full flex items-center justify-center">
           <img
-            src={getFullImageUrl(product.image) || "/placeholder.svg?height=120&width=120"}
+            src={getOptimizedImageUrl(product.image, { width: 330, height: 330, quality: 70 }) || "/placeholder.svg?height=120&width=120"}
             alt={product.name}
             loading="lazy"
             decoding="async"
@@ -1170,7 +1170,7 @@ const AccessoriesProductCard = ({ product }) => {
       <div className="relative mb-2 flex justify-center items-center" style={{ height: 190 }}>
         <Link to={getLocalizedPath(`/product/${encodeURIComponent(product.slug || product._id)}`)} className="w-full h-full flex items-center justify-center">
           <img
-            src={getFullImageUrl(product.image) || "/placeholder.svg?height=120&width=120"}
+            src={getOptimizedImageUrl(product.image, { width: 330, height: 330, quality: 70 }) || "/placeholder.svg?height=120&width=120"}
             alt={product.name}
             loading="lazy"
             decoding="async"

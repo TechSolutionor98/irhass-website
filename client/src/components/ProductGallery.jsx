@@ -70,9 +70,10 @@ const ProductGallery = ({ limit = 10, skipIds = [] }) => {
             className="group relative block aspect-[9/10] overflow-hidden bg-[#efece7]"
           >
             <img
-              src={getImageUrl(product)}
+              src={getImageUrl(product, { width: 380, quality: 72 })}
               alt={product.name}
               loading="lazy"
+              decoding="async"
               className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
             />
             {/* Hover wash. Without it there is no feedback that a tile is a link, since

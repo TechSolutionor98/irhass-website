@@ -1,5 +1,6 @@
 import dotenv from "dotenv"
 import path from "path"
+import crypto from "crypto"
 import { fileURLToPath } from "url"
 
 const __filename = fileURLToPath(import.meta.url)
@@ -179,8 +180,15 @@ app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
 
 const uploadsPath = path.join(__dirname, 'uploads');
+const uploadsCachePath = path.join(uploadsPath, '.cache');
 
-// Dynamic image optimization for local /uploads assets.
+if (!fs.existsSync(uploadsCachePath)) {
+  try {
+    fs.mkdirSync(uploadsCachePath, { recursive: true });
+  } catch {}
+}
+
+// Dynamic image optimization for local /uploads assets with disk cache & live server fallback.
 // Example: /uploads/products/a.webp?w=330&h=330&q=70&fmt=webp
 app.get('/uploads/*', async (req, res, next) => {
   try {
@@ -198,17 +206,48 @@ app.get('/uploads/*', async (req, res, next) => {
     const relPath = normalizedPath.replace(/^\/uploads\/?/, "")
     if (!relPath) return next()
     let absPath = path.resolve(uploadsPath, relPath)
-    
-    // If a .jpg was requested but doesn't exist, check if the .webp version exists
-    if (isJpgRequest && !fs.existsSync(absPath)) {
-      const webpPath = absPath.replace(/\.jpe?g$/i, '.webp')
-      if (fs.existsSync(webpPath)) {
-        absPath = webpPath
-      } else {
-        return res.status(400).send("Invalid image path")
-      }
-    } else if (!absPath.startsWith(path.resolve(uploadsPath))) {
+
+    if (!absPath.startsWith(path.resolve(uploadsPath))) {
       return res.status(400).send("Invalid image path")
+    }
+
+    // Check disk cache first for instant sub-millisecond response
+    const cacheKey = crypto
+      .createHash("md5")
+      .update(`${relPath}:${width}:${height}:${quality}:${format || (isJpgRequest ? "jpeg" : "webp")}`)
+      .digest("hex")
+    const cachedExt = format === "jpeg" || format === "jpg" || isJpgRequest ? "jpg" : format === "png" ? "png" : format === "avif" ? "avif" : "webp"
+    const cachedFilePath = path.join(uploadsCachePath, `${cacheKey}.${cachedExt}`)
+
+    if (fs.existsSync(cachedFilePath)) {
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable")
+      return res.sendFile(cachedFilePath)
+    }
+
+    // If source file is missing locally, attempt fallback fetch from live api.irhaas.com
+    if (!fs.existsSync(absPath)) {
+      if (isJpgRequest) {
+        const webpPath = absPath.replace(/\.jpe?g$/i, '.webp')
+        if (fs.existsSync(webpPath)) {
+          absPath = webpPath
+        }
+      }
+
+      if (!fs.existsSync(absPath)) {
+        try {
+          const remoteUrl = `https://api.irhaas.com/uploads/${relPath}`
+          const remoteRes = await fetch(remoteUrl)
+          if (remoteRes.ok) {
+            const buf = Buffer.from(await remoteRes.arrayBuffer())
+            fs.mkdirSync(path.dirname(absPath), { recursive: true })
+            fs.writeFileSync(absPath, buf)
+          } else {
+            return next()
+          }
+        } catch {
+          return next()
+        }
+      }
     }
 
     let pipeline = sharp(absPath).rotate()
@@ -238,20 +277,42 @@ app.get('/uploads/*', async (req, res, next) => {
 
     res.setHeader("Cache-Control", "public, max-age=31536000, immutable")
     const output = await pipeline.toBuffer()
+
+    // Save to disk cache asynchronously
+    fs.writeFile(cachedFilePath, output, () => {})
+
     return res.send(output)
   } catch (error) {
     return next()
   }
 })
 
-// Serve static files from uploads directory
-app.use('/uploads', express.static(uploadsPath));
+// Serve static files from uploads directory with live fallback for missing files
+app.use('/uploads', async (req, res, next) => {
+  const normalizedPath = String(req.path || "").replace(/\\/g, "/").replace(/\/+/g, "/")
+  const relPath = normalizedPath.replace(/^\//, "")
+  if (!relPath) return next()
+  const absPath = path.resolve(uploadsPath, relPath)
+  if (!absPath.startsWith(path.resolve(uploadsPath))) return next()
 
-// Add logging for static file requests
-app.use('/uploads', (req, res, next) => {
-  console.log('📁 Static file request:', req.path);
-  next();
-});
+  if (!fs.existsSync(absPath)) {
+    try {
+      const remoteUrl = `https://api.irhaas.com/uploads/${relPath}`
+      const remoteRes = await fetch(remoteUrl)
+      if (remoteRes.ok) {
+        const buf = Buffer.from(await remoteRes.arrayBuffer())
+        fs.mkdirSync(path.dirname(absPath), { recursive: true })
+        fs.writeFileSync(absPath, buf)
+      }
+    } catch {}
+  }
+  next()
+})
+
+app.use('/uploads', express.static(uploadsPath, {
+  maxAge: '30d',
+  immutable: true,
+}));
 
 console.log('📂 Serving static files from:', uploadsPath);
 

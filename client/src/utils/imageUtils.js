@@ -213,13 +213,28 @@ export const getImageIdentifier = (imageUrl) => {
   return imageUrl
 }
 
-// Original function for backward compatibility
-export const getImageUrl = (product) => {
-  // Try different image fields in order of preference
-  if (product.image) return getFullImageUrl(product.image)
-  if (product.galleryImages && product.galleryImages.length > 0) return getFullImageUrl(product.galleryImages[0])
-  if (product.images && product.images.length > 0) return getFullImageUrl(product.images[0])
-  
-  // Fallback to placeholder
-  return "/placeholder.svg?height=150&width=150"
+// Smart optimized product image resolver with auto-resizing
+export const getImageUrl = (product, options = { width: 500, quality: 72 }) => {
+  if (!product) return "/placeholder.svg?height=150&width=150"
+
+  const rawUrl =
+    (typeof product === "string" ? product : null) ||
+    product.image ||
+    (product.galleryImages && product.galleryImages[0]) ||
+    (product.images && product.images[0])
+
+  if (!rawUrl || !String(rawUrl).trim()) {
+    return "/placeholder.svg?height=150&width=150"
+  }
+
+  // Bypass optimization if raw full-size image is explicitly requested
+  if (options === false || options?.raw) {
+    return getFullImageUrl(rawUrl)
+  }
+
+  const width = options?.width !== undefined ? options.width : 500
+  const height = options?.height
+  const quality = options?.quality !== undefined ? options.quality : 72
+
+  return getOptimizedImageUrl(rawUrl, { width, height, quality })
 }

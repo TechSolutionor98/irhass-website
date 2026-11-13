@@ -7,7 +7,7 @@ import { useCart } from "../context/CartContext"
 import { useAuth } from "../context/AuthContext"
 import { useCurrency } from "../context/CurrencyContext"
 import { useLanguage } from "../context/LanguageContext"
-import { getFullImageUrl } from "../utils/imageUtils"
+import { getFullImageUrl, getOptimizedImageUrl } from "../utils/imageUtils"
 import { rememberReturnPath } from "../utils/authRedirect"
 import TranslatedText from "./TranslatedText"
 import config from "../config/config"
@@ -198,8 +198,10 @@ const CartDrawer = () => {
                       <Link to={href} onClick={closeCart} className="flex-shrink-0">
                         <div className="h-[132px] w-[104px] overflow-hidden bg-[#efece7]">
                           <img
-                            src={getFullImageUrl(item.image) || "/placeholder.svg"}
+                            src={getOptimizedImageUrl(item.image, { width: 220, height: 280, quality: 70 }) || "/placeholder.svg"}
                             alt={item.name}
+                            loading="lazy"
+                            decoding="async"
                             className="h-full w-full object-cover"
                           />
                         </div>
@@ -338,9 +340,10 @@ const CartDrawer = () => {
                           >
                             <div className="h-[120px] w-[94px] overflow-hidden bg-[#efece7]">
                               <img
-                                src={getFullImageUrl(product.image) || "/placeholder.svg"}
+                                src={getOptimizedImageUrl(product.image, { width: 200, height: 250, quality: 70 }) || "/placeholder.svg"}
                                 alt={product.name}
                                 loading="lazy"
+                                decoding="async"
                                 className="h-full w-full object-cover"
                               />
                             </div>

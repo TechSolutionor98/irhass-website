@@ -162,9 +162,10 @@ const FeaturedProducts = ({ title = "Featured", limit = 12, viewAllHref = "/shop
                   >
                     <div className="relative aspect-[3/4] w-full overflow-hidden bg-stone-100">
                       <img
-                        src={getImageUrl(product)}
+                        src={getImageUrl(product, { width: 440, quality: 72 })}
                         alt={product.name}
                         loading="lazy"
+                        decoding="async"
                         className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
                       />
                       {discountPct > 0 && (

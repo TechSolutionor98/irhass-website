@@ -8,7 +8,7 @@ import { useToast } from "../context/ToastContext"
 import { useWishlist } from "../context/WishlistContext"
 import { useCurrency } from "../context/CurrencyContext"
 import LoyaltyEarnBadge from "../components/LoyaltyEarnBadge"
-import { getFullImageUrl } from "../utils/imageUtils"
+import { getFullImageUrl, getOptimizedImageUrl } from "../utils/imageUtils"
 import { swatchBackground } from "../utils/colorSwatch"
 import { isSellable } from "../utils/stockGuard"
 import { rememberReturnPath } from "../utils/authRedirect"
@@ -892,8 +892,10 @@ const ProductDetails = () => {
               className="w-5 h-5 text-yellow-600 bg-gray-100 border-gray-300 rounded focus:ring-yellow-500 focus:ring-2"
             />
             <img
-              src={getFullImageUrl(product.image) || "/placeholder.svg"}
+              src={getOptimizedImageUrl(product.image, { width: 140, height: 140, quality: 70 }) || "/placeholder.svg"}
               alt={product.name}
+              loading="lazy"
+              decoding="async"
               className="w-16 h-16 object-cover rounded-md"
             />
             <div className="flex-1">
@@ -931,8 +933,10 @@ const ProductDetails = () => {
                   className="w-5 h-5 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2 disabled:cursor-not-allowed disabled:opacity-40"
                 />
                 <img
-                  src={getFullImageUrl(item.image) || "/placeholder.svg"}
+                  src={getOptimizedImageUrl(item.image, { width: 140, height: 140, quality: 70 }) || "/placeholder.svg"}
                   alt={item.name}
+                  loading="lazy"
+                  decoding="async"
                   className={`w-16 h-16 object-cover rounded-md ${sellable ? "" : "grayscale"}`}
                 />
                 <div className="flex-1">
@@ -2763,8 +2767,9 @@ const ProductDetails = () => {
                   )
                 ) : (
                   <img
-                    src={getFullImageUrl(productImages[selectedImage]?.url) || "/placeholder.svg?height=400&width=400"}
+                    src={getOptimizedImageUrl(productImages[selectedImage]?.url, { width: 900, quality: 78 }) || "/placeholder.svg?height=400&width=400"}
                     alt={product.name}
+                    decoding="async"
                     className="absolute inset-0 h-full w-full cursor-zoom-in object-contain"
                     onClick={() => handleImageClick(selectedImage)}
                   />
@@ -2872,8 +2877,10 @@ const ProductDetails = () => {
                         </>
                       ) : (
                         <img
-                          src={getFullImageUrl(media?.url) || "/placeholder.svg?height=64&width=64"}
+                          src={getOptimizedImageUrl(media?.url, { width: 140, height: 175, quality: 70 }) || "/placeholder.svg?height=64&width=64"}
                           alt={`${product.name} - view ${index + 1}`}
+                          loading="lazy"
+                          decoding="async"
                           className="h-full w-full object-cover"
                         />
                       )}
@@ -4104,9 +4111,10 @@ const ProductDetails = () => {
                     >
                       <div className="relative aspect-[3/4] w-full overflow-hidden bg-[#efece7]">
                         <img
-                          src={getFullImageUrl(relatedProduct.image) || "/placeholder.svg?height=400&width=300"}
+                          src={getOptimizedImageUrl(relatedProduct.image, { width: 400, quality: 72 }) || "/placeholder.svg?height=400&width=300"}
                           alt={relatedProduct.name}
                           loading="lazy"
+                          decoding="async"
                           className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
                         />
                         {discountPct > 0 && (
@@ -4262,8 +4270,10 @@ const ProductDetails = () => {
                       </>
                     ) : (
                       <img
-                        src={getFullImageUrl(media?.url) || "/placeholder.svg?height=150&width=150"}
+                        src={getOptimizedImageUrl(media?.url, { width: 150, height: 150, quality: 70 }) || "/placeholder.svg?height=150&width=150"}
                         alt={`${product.name} ${index + 1}`}
+                        loading="lazy"
+                        decoding="async"
                         className="w-full h-24 object-cover"
                       />
                     )}
@@ -4308,8 +4318,10 @@ const ProductDetails = () => {
                     </>
                   ) : (
                     <img
-                      src={getFullImageUrl(media?.url) || "/placeholder.svg?height=64&width=64"}
+                      src={getOptimizedImageUrl(media?.url, { width: 120, height: 120, quality: 70 }) || "/placeholder.svg?height=64&width=64"}
                       alt={`${product.name} ${index + 1}`}
+                      loading="lazy"
+                      decoding="async"
                       className="w-full h-full object-cover"
                     />
                   )}

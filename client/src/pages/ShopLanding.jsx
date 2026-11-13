@@ -67,8 +67,10 @@ const ShopLanding = () => {
               className="group relative h-40 md:h-52 rounded-2xl overflow-hidden bg-white shadow-md hover:shadow-xl transition-all"
             >
               <img 
-                src={getOptimizedImageUrl(category.image) || "/placeholder.svg"} 
+                src={getOptimizedImageUrl(category.image, { width: 320, height: 240, quality: 70 }) || "/placeholder.svg"} 
                 alt={category.name}
+                loading="lazy"
+                decoding="async"
                 className="w-full h-full object-contain p-4 group-hover:scale-110 transition-transform duration-500"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />

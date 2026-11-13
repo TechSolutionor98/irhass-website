@@ -1257,20 +1257,12 @@ router.get(
 
     let productsQuery = Product.find(query)
       .select(
-        "name nameAr slug sku price buyingPrice offerPrice discount image countInStock stockStatus stockStatusAr brand category subCategory parentCategory subCategory2 subCategory3 subCategory4 featured tags createdAt rating numReviews targetCountries countryStock",
+        "name nameAr slug sku price buyingPrice offerPrice discount image countInStock stockStatus stockStatusAr brand category subCategory parentCategory featured tags createdAt rating numReviews targetCountries countryStock",
       )
       .populate("brand", "name nameAr slug")
-      .populate("series", "name optionType")
-      .populate("model", "name optionType")
-      .populate("make", "name optionType")
-      .populate("manufacturer", "name optionType")
-      .populate("soldBy", "name optionType")
       .populate("category", "name nameAr slug")
-      .populate("subCategory", "name nameAr slug") // Populate legacy subCategory field
+      .populate("subCategory", "name nameAr slug")
       .populate("parentCategory", "name nameAr slug")
-      .populate("subCategory2", "name nameAr slug") // Populate Level 2 subcategories
-      .populate("subCategory3", "name nameAr slug") // Populate Level 3 subcategories
-      .populate("subCategory4", "name nameAr slug") // Populate Level 4 subcategories
       .lean() // Use lean() for better performance
       .sort({ createdAt: -1 })
 
@@ -1582,11 +1574,6 @@ router.get(
         "name nameAr slug sku price buyingPrice offerPrice discount image countInStock stockStatus stockStatusAr brand category parentCategory featured tags createdAt rating numReviews",
       )
       .populate("brand", "name nameAr slug")
-      .populate("series", "name optionType")
-      .populate("model", "name optionType")
-      .populate("make", "name optionType")
-      .populate("manufacturer", "name optionType")
-      .populate("soldBy", "name optionType")
       .populate("category", "name nameAr slug")
       .populate("parentCategory", "name nameAr slug")
       .lean()
@@ -1876,11 +1863,6 @@ router.get(
     const product = await Product.findById(req.params.id)
       .populate("category", "name nameAr slug")
       .populate("brand", "name nameAr")
-      .populate("series", "name optionType")
-      .populate("model", "name optionType")
-      .populate("make", "name optionType")
-      .populate("manufacturer", "name optionType")
-      .populate("soldBy", "name optionType")
 
     if (product && product.isActive) {
       res.json(product)
@@ -1922,11 +1904,6 @@ router.get(
       .populate("subCategory3", "name nameAr slug")
       .populate("subCategory4", "name nameAr slug")
       .populate("brand", "name nameAr")
-      .populate("series", "name optionType")
-      .populate("model", "name optionType")
-      .populate("make", "name optionType")
-      .populate("manufacturer", "name optionType")
-      .populate("soldBy", "name optionType")
       .populate({
         path: "variations.product",
         select: "name nameAr slug image price buyingPrice offerPrice sku isActive hideFromShop selfVariationText selfVariationTextAr reverseVariationText reverseVariationTextAr",

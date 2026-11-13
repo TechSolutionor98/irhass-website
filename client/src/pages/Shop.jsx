@@ -32,13 +32,7 @@ const INFINITY_SYMBOL = "∞"
 const NUMERIC_INPUT_PATTERN = /^\d*$/
 const SHOP_HYBRID_BOOTSTRAP_ENABLED =
   String(import.meta.env?.VITE_SHOP_HYBRID_BOOTSTRAP_ENABLED || "false").toLowerCase() === "true"
-const PRODUCT_SYSTEM_FILTERS = [
-  { key: "series", routeType: "series", label: "Series" },
-  { key: "model", routeType: "model", label: "Model" },
-  { key: "make", routeType: "make", label: "Make" },
-  { key: "manufacturer", routeType: "manufacturer", label: "Manufacturer" },
-  { key: "soldBy", routeType: "sold-by", label: "Sold By" },
-]
+const PRODUCT_SYSTEM_FILTERS = []
 
 const bounceStyle = {
   animation: "bounce 1s infinite",
