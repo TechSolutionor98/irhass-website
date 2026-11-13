@@ -57,7 +57,7 @@ router.get(
       // Banners - active only
       Banner.find({ isActive: true })
         .select(
-          'title titleAr subtitle subtitleAr image mobileImage link buttonLink position section category sortOrder buttonText buttonTextAr deviceType targetCountries',
+          'title titleAr subtitle subtitleAr image mobileImage link buttonLink position section category sortOrder buttonText buttonTextAr deviceType targetCountries video backgroundColor mediaType showText finePrint textColor overlayOpacity heroHeight description isActive',
         )
         .populate('category', 'name nameAr slug')
         .sort({ sortOrder: 1, createdAt: -1 })

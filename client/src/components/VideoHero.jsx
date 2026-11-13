@@ -20,8 +20,15 @@ const VideoHero = ({
   mobileBanner = null,
   fallbackSrc = "/media/hero-banner.jpg",
   fallbackLink = "/shop",
+  className = "mb-10 sm:mb-14 md:mb-16",
 }) => {
   const { getLocalizedPath } = useLanguage()
+
+  // If no banner is provided or banners are explicitly deactivated by admin, hide this section
+  if (!desktopBanner && !mobileBanner) return null
+  if (desktopBanner?.isActive === false && mobileBanner?.isActive === false) return null
+  if (desktopBanner?.isActive === false && !mobileBanner) return null
+  if (mobileBanner?.isActive === false && !desktopBanner) return null
 
   const desktopImage = desktopBanner?.image
     ? getFullImageUrl(desktopBanner.image)
@@ -63,7 +70,7 @@ const VideoHero = ({
   )
 
   return (
-    <section className="relative w-full overflow-hidden bg-footer-bg" aria-label="Featured collection">
+    <section className={`relative w-full overflow-hidden bg-footer-bg ${className}`} aria-label="Featured collection">
       {isExternal ? (
         <a
           href={normalizedLink}

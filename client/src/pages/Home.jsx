@@ -190,20 +190,46 @@ const Home = () => {
     [heroBanners, deviceType, activeCountryCode],
   )
 
-  // Dynamic Image Banner displayed immediately below the Promotional Section ("25% Off New Season – Bottom Image")
+  const isBannerActiveAndValid = (b) => {
+    if (!b) return false
+    if (b.isActive === false) return false
+    if (b.validUntil && new Date(b.validUntil) < new Date()) return false
+    if (b.validFrom && new Date(b.validFrom) > new Date()) return false
+    return true
+  }
+
+  // Top Hero Promotional Section Banner (Admin configurable: text, color, video, image)
+  const heroSectionBanner = useMemo(() => {
+    return (
+      allBanners.find(
+        (b) =>
+          isBannerActiveAndValid(b) &&
+          (b.position === "hero" || b.position === "promotional") &&
+          isBannerVisibleInCountry(b, activeCountryCode),
+      ) ||
+      allBanners.find(
+        (b) =>
+          isBannerActiveAndValid(b) &&
+          (b.position === "hero" || b.position === "promotional"),
+      ) ||
+      null
+    )
+  }, [allBanners, activeCountryCode])
+
+  // Dynamic Image Banner displayed below Featured Slider ("25% Off New Season – Bottom Image")
   const seasonBottomDesktopBanner = useMemo(() => {
     return (
       allBanners.find(
         (b) =>
-          b.isActive !== false &&
-          (b.position === "season-bottom" || b.position === "hero-desktop" || b.position === "hero") &&
+          isBannerActiveAndValid(b) &&
+          (b.position === "season-bottom" || b.position === "hero-desktop") &&
           (b.deviceType || "desktop").toLowerCase() === "desktop" &&
           isBannerVisibleInCountry(b, activeCountryCode),
       ) ||
       allBanners.find(
         (b) =>
-          b.isActive !== false &&
-          (b.position === "season-bottom" || b.position === "hero-desktop" || b.position === "hero") &&
+          isBannerActiveAndValid(b) &&
+          (b.position === "season-bottom" || b.position === "hero-desktop") &&
           isBannerVisibleInCountry(b, activeCountryCode),
       ) ||
       null
@@ -214,15 +240,15 @@ const Home = () => {
     return (
       allBanners.find(
         (b) =>
-          b.isActive !== false &&
-          (b.position === "season-bottom" || b.position === "hero-mobile" || b.position === "hero") &&
+          isBannerActiveAndValid(b) &&
+          (b.position === "season-bottom" || b.position === "hero-mobile") &&
           (b.deviceType || "").toLowerCase() === "mobile" &&
           isBannerVisibleInCountry(b, activeCountryCode),
       ) ||
       allBanners.find(
         (b) =>
-          b.isActive !== false &&
-          (b.position === "season-bottom" || b.position === "hero-mobile" || b.position === "hero") &&
+          isBannerActiveAndValid(b) &&
+          (b.position === "season-bottom" || b.position === "hero-mobile") &&
           isBannerVisibleInCountry(b, activeCountryCode),
       ) ||
       null
@@ -234,14 +260,14 @@ const Home = () => {
     return (
       allBanners.find(
         (b) =>
-          b.isActive !== false &&
+          isBannerActiveAndValid(b) &&
           (b.position === "sale-bottom" || b.position === "second-banner-desktop" || b.position === "second-banner") &&
           (b.deviceType || "desktop").toLowerCase() === "desktop" &&
           isBannerVisibleInCountry(b, activeCountryCode),
       ) ||
       allBanners.find(
         (b) =>
-          b.isActive !== false &&
+          isBannerActiveAndValid(b) &&
           (b.position === "sale-bottom" || b.position === "second-banner-desktop" || b.position === "second-banner") &&
           isBannerVisibleInCountry(b, activeCountryCode),
       ) ||
@@ -253,14 +279,14 @@ const Home = () => {
     return (
       allBanners.find(
         (b) =>
-          b.isActive !== false &&
+          isBannerActiveAndValid(b) &&
           (b.position === "sale-bottom" || b.position === "second-banner-mobile" || b.position === "second-banner") &&
           (b.deviceType || "").toLowerCase() === "mobile" &&
           isBannerVisibleInCountry(b, activeCountryCode),
       ) ||
       allBanners.find(
         (b) =>
-          b.isActive !== false &&
+          isBannerActiveAndValid(b) &&
           (b.position === "sale-bottom" || b.position === "second-banner-mobile" || b.position === "second-banner") &&
           isBannerVisibleInCountry(b, activeCountryCode),
       ) ||
@@ -932,26 +958,30 @@ const Home = () => {
           </div>
         </div>
       )}
-      {/* Promotional text section */}
-      <PromoBanner />
+      {/* 1. Hero promotional section (Customizable from Admin: text, color, video, image) */}
+      {heroSectionBanner && <PromoBanner banner={heroSectionBanner} />}
 
-      {/* Dynamic image banner placed immediately below promotional text section */}
-      <VideoHero
-        desktopBanner={seasonBottomDesktopBanner}
-        mobileBanner={seasonBottomMobileBanner}
-      />
-
-      {/* Featured rail. Renders nothing when no product is flagged featured. */}
+      {/* 2. Featured rail. Renders nothing when no product is flagged featured. */}
       <FeaturedProducts initialProducts={featuredProducts} />
 
-      {/* Wordless photo wall. Hidden until there are enough products to fill a row. */}
+      {/* 3. Dynamic image banner placed below Featured slider ("25% Off New Season – Bottom Image") */}
+      {(seasonBottomDesktopBanner || seasonBottomMobileBanner) && (
+        <VideoHero
+          desktopBanner={seasonBottomDesktopBanner}
+          mobileBanner={seasonBottomMobileBanner}
+        />
+      )}
+
+      {/* 4. Wordless photo wall. Hidden until there are enough products to fill a row. */}
       <ProductGallery />
 
       {/* Campaign banner. Offer, image and both buttons are props -- edit them here. */}
-      <SaleBanner
-        desktopBanner={saleBottomDesktopBanner}
-        mobileBanner={saleBottomMobileBanner}
-      />
+      {(saleBottomDesktopBanner || saleBottomMobileBanner) && (
+        <SaleBanner
+          desktopBanner={saleBottomDesktopBanner}
+          mobileBanner={saleBottomMobileBanner}
+        />
+      )}
 
       {/* Six products from each category, straight from the API. */}
       <CategoryShowcase categories={categories} />

@@ -14,7 +14,42 @@ const bannerSchema = mongoose.Schema(
     },
     image: {
       type: String,
-      required: true,
+      required: false,
+      default: "",
+    },
+    video: {
+      type: String,
+      default: "",
+    },
+    backgroundColor: {
+      type: String,
+      default: "#8b5e34",
+    },
+    mediaType: {
+      type: String,
+      enum: ["none", "image", "video"],
+      default: "none",
+    },
+    showText: {
+      type: Boolean,
+      default: true,
+    },
+    finePrint: {
+      type: String,
+      default: "",
+    },
+    textColor: {
+      type: String,
+      default: "#ffffff",
+    },
+    overlayOpacity: {
+      type: Number,
+      default: 0,
+    },
+    heroHeight: {
+      type: String,
+      enum: ["compact", "medium", "large", "fullscreen"],
+      default: "large",
     },
     backgroundImage: {
       type: String,
