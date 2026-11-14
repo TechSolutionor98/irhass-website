@@ -54,9 +54,9 @@ const VideoUpload = ({ onVideoUpload, currentVideo, label = "Upload Video" }) =>
       console.log("📤 Uploading video...")
       const { data } = await axios.post(`${config.API_URL}/api/upload/video`, formData, {
         headers: {
-          "Content-Type": "multipart/form-data",
           Authorization: `Bearer ${token}`,
         },
+        timeout: 300000, // 5-minute timeout for large video uploads
         onUploadProgress: (progressEvent) => {
           const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
           setUploadProgress(percentCompleted)

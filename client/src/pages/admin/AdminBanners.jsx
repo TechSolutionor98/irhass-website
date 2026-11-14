@@ -184,15 +184,14 @@ const AdminBanners = () => {
       const uploadData = new FormData()
       uploadData.append("video", file)
 
-      const headers = {
-        "Content-Type": "multipart/form-data",
-      }
+      const headers = {}
       if (token) {
         headers.Authorization = `Bearer ${token}`
       }
 
       const response = await axios.post(`${config.API_URL}/api/upload/video`, uploadData, {
         headers,
+        timeout: 300000, // 5-minute timeout for large video uploads
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
