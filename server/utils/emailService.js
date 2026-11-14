@@ -10,7 +10,7 @@ import User from "../models/userModel.js"
  */
 export const BRAND_ASSETS = {
   storeName: "Irha's Wardrobe",
-  websiteUrl: "https://www.irhaas.com",
+  websiteUrl: "https://irhaas.com",
   // Official website logos hosted on high-availability HTTPS CDN
   logoWideUrl: "https://res.cloudinary.com/dyfhsu5v6/image/upload/v1794481467/irhaas-branding/irhaas-logo-wide.png",
   logoSquareUrl: "https://res.cloudinary.com/dyfhsu5v6/image/upload/v1794481469/irhaas-branding/irhaas-logo.png",
@@ -68,18 +68,25 @@ export const BRAND_ASSETS = {
   ],
 }
 
-// Helper to ensure image URLs are absolute for email clients
+// Helper to ensure image URLs are absolute and publicly accessible for email clients
 const toAbsoluteUrl = (src) => {
   if (!src) return BRAND_ASSETS.logoSquareUrl
   const s = String(src).trim()
-  if (s.startsWith("http://") || s.startsWith("https://")) return s
+
+  // If already absolute URL:
+  if (s.startsWith("http://") || s.startsWith("https://")) {
+    // If it points to localhost/127.0.0.1, external email clients (Gmail) cannot reach it!
+    // Rewrite to public storefront domain
+    if (s.includes("localhost:") || s.includes("127.0.0.1:")) {
+      return s.replace(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i, "https://irhaas.com")
+    }
+    // Fix www.irhaas.com which has no DNS entry to irhaas.com
+    return s.replace("://www.irhaas.com", "://irhaas.com")
+  }
   if (s.startsWith("//")) return `https:${s}`
-  const base =
-    process.env.PUBLIC_BASE_URL ||
-    process.env.SERVER_PUBLIC_URL ||
-    process.env.API_BASE_URL ||
-    process.env.FRONTEND_URL ||
-    "https://www.irhaas.com"
+
+  // Public HTTPS domain for email images - never localhost or www.irhaas.com
+  const base = "https://irhaas.com"
   if (s.startsWith("/")) return `${base}${s}`
   return `${base}/uploads/${s}`
 }
@@ -1490,7 +1497,7 @@ export const sendBackInStockEmail = async ({
     const pName = escapeHtml(productName || "Your Requested Item")
     const pPrice = productPrice ? `${Number(productPrice).toLocaleString()} Rs` : ""
     const pImg = toAbsoluteUrl(productImage)
-    const pUrl = productUrl || `${BRAND_ASSETS.websiteUrl}/shop`
+    const pUrl = (productUrl || `${BRAND_ASSETS.websiteUrl}/shop`).replace("://www.irhaas.com", "://irhaas.com")
     const sizeBadge = size
       ? `<div style="display:inline-block;background-color:#f5f5f4;border:1px solid #d6d3d1;padding:3px 12px;border-radius:4px;font-size:12px;font-weight:600;color:#44403c;margin-top:8px;">Size: ${escapeHtml(size)}</div>`
       : ""
@@ -1511,16 +1518,20 @@ export const sendBackInStockEmail = async ({
         <!-- Product Card -->
         <div style="background-color:#ffffff;border:1px solid ${BRAND_ASSETS.colors.border};border-radius:12px;padding:20px;margin:24px auto;max-width:380px;text-align:center;box-shadow:0 4px 14px rgba(0,0,0,0.04);">
           <div style="width:100%;height:260px;overflow:hidden;border-radius:8px;margin-bottom:16px;background-color:#f9f8f6;">
-            <img src="${pImg}" alt="${pName}" style="width:100%;height:100%;object-fit:cover;display:block;" />
+            <a href="${pUrl}" target="_blank" style="text-decoration:none;display:block;width:100%;height:100%;">
+              <img src="${pImg}" alt="${pName}" width="340" style="width:100%;max-width:100%;height:260px;object-fit:cover;display:block;border:0;" />
+            </a>
           </div>
-          <h3 style="font-size:17px;font-weight:700;color:${BRAND_ASSETS.colors.dark};margin:0 0 6px;">${pName}</h3>
+          <h3 style="font-size:17px;font-weight:700;color:${BRAND_ASSETS.colors.dark};margin:0 0 6px;">
+            <a href="${pUrl}" target="_blank" style="color:${BRAND_ASSETS.colors.dark};text-decoration:none;">${pName}</a>
+          </h3>
           ${pPrice ? `<div style="font-size:18px;font-weight:700;color:${BRAND_ASSETS.colors.primary};margin-bottom:6px;">${pPrice}</div>` : ""}
           ${sizeBadge}
         </div>
 
         <!-- Call to Action Button -->
         <div style="margin:28px 0 16px;">
-          <a href="${pUrl}" target="_blank" class="btn-gold" style="display:inline-block;padding:15px 40px;font-size:14px;letter-spacing:1px;">
+          <a href="${pUrl}" target="_blank" class="btn-gold" style="display:inline-block;padding:15px 40px;font-size:14px;letter-spacing:1px;background-color:${BRAND_ASSETS.colors.primary};color:#ffffff;text-decoration:none;border-radius:4px;font-weight:600;">
             SHOP NOW — BEFORE IT SELLS OUT
           </a>
         </div>

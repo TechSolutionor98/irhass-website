@@ -7,7 +7,7 @@
  * produces a shareable link must build it here instead.
  */
 
-const DEFAULT_SITE_ORIGIN = "https://www.irhaas.com"
+const DEFAULT_SITE_ORIGIN = "https://irhaas.com"
 
 // An API/admin host is never a customer-facing address.
 const NON_PUBLIC_HOST_PATTERN = /^(api|admin|staging|dev)\./i

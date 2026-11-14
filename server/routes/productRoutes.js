@@ -1817,6 +1817,15 @@ router.put(
       // Invalidate storefront product cache after bulk status update
       await invalidateCache("products")
 
+      // Notify back-in-stock subscribers if products marked In Stock
+      if (updateData.stockStatus === "In Stock") {
+        for (const pId of productIds) {
+          notifyBackInStockSubscribers(pId).catch((err) =>
+            console.error("[BackInStock] Bulk status trigger error:", err),
+          )
+        }
+      }
+
       // Determine status message
       let statusMessage = ""
       if (updateData.stockStatus) {
@@ -2629,12 +2638,8 @@ router.put(
       // Invalidate product cache
       await invalidateCache('products')
 
-      // Notify back-in-stock subscribers if product is replenished
-      const isNowInStock =
-        updatedProduct.stockStatus === "In Stock" ||
-        (Number(updatedProduct.countInStock) > 0 && updatedProduct.stockStatus !== "Out of Stock")
-
-      if (previousWasOutOfStock && isNowInStock && updatedProduct.isActive && !updatedProduct.isDeleted) {
+      // Notify back-in-stock subscribers if product or any size is replenished
+      if (updatedProduct.isActive && !updatedProduct.isDeleted) {
         notifyBackInStockSubscribers(updatedProduct._id).catch((err) =>
           console.error("[BackInStock] Trigger error:", err),
         )

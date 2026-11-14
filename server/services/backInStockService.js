@@ -71,26 +71,40 @@ export const subscribeToBackInStock = async ({ productId, email, name = "", size
   }
 }
 
-export const checkSubscriptionStatus = async (productId, email, size = "") => {
-  if (!productId || !email) return { subscribed: false }
+export const checkSubscriptionStatus = async (productId, email, size = "", userId = null) => {
+  if (!productId) return { subscribed: false }
 
-  const cleanEmail = String(email).trim().toLowerCase()
+  const cleanEmail = email ? String(email).trim().toLowerCase() : ""
   const cleanSize = String(size || "").trim()
 
   const query = {
     product: productId,
-    email: cleanEmail,
     notified: false,
   }
   if (cleanSize) {
     query.size = cleanSize
   }
 
+  const orConditions = []
+  if (cleanEmail) {
+    orConditions.push({ email: cleanEmail })
+  }
+  if (userId) {
+    orConditions.push({ user: userId })
+  }
+
+  if (orConditions.length === 0) {
+    return { subscribed: false }
+  }
+
+  query.$or = orConditions
+
   const sub = await BackInStockSubscription.findOne(query).lean()
 
   return {
     subscribed: !!sub,
     size: sub?.size || "",
+    email: sub?.email || "",
     createdAt: sub?.createdAt || null,
   }
 }
@@ -136,21 +150,23 @@ export const notifyBackInStockSubscribers = async (productId) => {
 
     console.log(`[BackInStock] Found ${pendingSubscribers.length} customer(s) waiting for "${product.name}". Evaluating restock status...`)
 
-    const productUrl = `${BRAND_ASSETS.websiteUrl}/product/${product.slug || product._id}`
+    const cleanOrigin = (BRAND_ASSETS.websiteUrl || "https://irhaas.com").replace("://www.irhaas.com", "://irhaas.com")
+    const productUrl = `${cleanOrigin}/product/${product.slug || product._id}`
 
     for (const sub of pendingSubscribers) {
       try {
         // If subscriber requested a specific size, verify that exact size is currently in stock!
         if (sub.size && product.sizes && Array.isArray(product.sizes) && product.sizes.length > 0) {
+          const cleanSubSize = String(sub.size).trim().toLowerCase()
           const matchingSize = product.sizes.find(
             (s) =>
-              (s.code && s.code.toLowerCase() === sub.size.toLowerCase()) ||
-              (s.name && s.name.toLowerCase() === sub.size.toLowerCase()),
+              (s.code && String(s.code).trim().toLowerCase() === cleanSubSize) ||
+              (s.name && String(s.name).trim().toLowerCase() === cleanSubSize),
           )
 
-          // If the requested size is still 0 or undefined, do NOT notify yet
-          if (matchingSize && matchingSize.countInStock !== undefined && Number(matchingSize.countInStock) <= 0) {
-            console.log(`[BackInStock] Size "${sub.size}" for "${product.name}" is still out of stock (remaining: ${matchingSize.countInStock}). Keeping ${sub.email} on waitlist.`)
+          // If size not found or remaining stock <= 0, keep waiting
+          if (!matchingSize || (matchingSize.countInStock !== undefined && Number(matchingSize.countInStock) <= 0)) {
+            console.log(`[BackInStock] Size "${sub.size}" for "${product.name}" is still out of stock. Keeping ${sub.email} on waitlist.`)
             continue
           }
         } else {

@@ -76,11 +76,11 @@ router.get(
     const email = req.query.email || req.user?.email
     const size = req.query.size || ""
 
-    if (!email) {
+    if (!email && !req.user?._id) {
       return res.json({ subscribed: false })
     }
 
-    const status = await checkSubscriptionStatus(productId, email, size)
+    const status = await checkSubscriptionStatus(productId, email, size, req.user?._id)
     res.json(status)
   }),
 )

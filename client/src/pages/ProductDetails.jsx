@@ -236,20 +236,25 @@ const ProductDetails = () => {
   useEffect(() => {
     if (user?.email) {
       setStockSubEmail(user.email)
+    } else {
+      const saved = localStorage.getItem("lastStockSubEmail") || ""
+      if (saved) setStockSubEmail(saved)
     }
   }, [user?.email])
 
   // Check if current user is already subscribed to this product's restock alerts (per size if selected)
   useEffect(() => {
     if (!product?._id) return
-    const emailToCheck = user?.email || localStorage.getItem("lastStockSubEmail")
-    if (!emailToCheck) return
+    const emailToCheck = (stockSubEmail || user?.email || localStorage.getItem("lastStockSubEmail") || "").trim()
 
     const curSize = getCurrentSize()
     const sizeParam = curSize ? `&size=${encodeURIComponent(curSize.code || curSize.name || "")}` : ""
 
+    const token = localStorage.getItem("token")
+    const headers = token ? { Authorization: `Bearer ${token}` } : {}
+
     axios
-      .get(`${config.API_URL}/api/back-in-stock/status/${product._id}?email=${encodeURIComponent(emailToCheck)}${sizeParam}`)
+      .get(`${config.API_URL}/api/back-in-stock/status/${product._id}?email=${encodeURIComponent(emailToCheck)}${sizeParam}`, { headers })
       .then((res) => {
         if (res.data?.subscribed) {
           setIsSubscribedToStock(true)
@@ -262,7 +267,8 @@ const ProductDetails = () => {
 
   const handleSubscribeStock = async (e) => {
     if (e && e.preventDefault) e.preventDefault()
-    const targetEmail = (user?.email || stockSubEmail || "").trim()
+    // User-entered email in modal takes priority over account login email
+    const targetEmail = (stockSubEmail || user?.email || "").trim()
 
     if (!targetEmail) {
       setShowStockSubModal(true)
@@ -294,6 +300,7 @@ const ProductDetails = () => {
       )
 
       localStorage.setItem("lastStockSubEmail", targetEmail)
+      setStockSubEmail(targetEmail)
       setIsSubscribedToStock(true)
       setShowStockSubModal(false)
       showToast(
@@ -3817,28 +3824,32 @@ const ProductDetails = () => {
                 {isEffectiveOutOfStock() ? (
                   <div className="w-full space-y-3 pt-1">
                     {isSubscribedToStock ? (
-                      <div className="w-full flex items-center justify-center gap-2.5 py-4 px-4 bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-semibold uppercase tracking-[0.12em] text-center">
-                        <CheckCircle size={16} className="text-emerald-600 flex-shrink-0" />
-                        <span>
-                          <TranslatedText>
-                            {getCurrentSize()
-                              ? `Alert Active for Size ${getCurrentSize().code || getCurrentSize().name} — We'll Email You`
-                              : "Alert Active — We'll Email You When Back in Stock"}
-                          </TranslatedText>
-                        </span>
+                      <div className="w-full flex items-center justify-between gap-2 py-3.5 px-4 bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-semibold uppercase tracking-[0.12em]">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <CheckCircle size={16} className="text-emerald-600 flex-shrink-0" />
+                          <span className="truncate">
+                            <TranslatedText>
+                              {getCurrentSize()
+                                ? `Alert Active for Size ${getCurrentSize().code || getCurrentSize().name}`
+                                : "Alert Active — We'll Email You"}
+                            </TranslatedText>
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowStockSubModal(true)}
+                          className="text-[11px] underline text-emerald-700 hover:text-emerald-900 tracking-normal capitalize flex-shrink-0 cursor-pointer font-medium"
+                          title="Change alert email"
+                        >
+                          <TranslatedText>Change email</TranslatedText>
+                        </button>
                       </div>
                     ) : (
                       <button
                         type="button"
-                        onClick={() => {
-                          if (user?.email) {
-                            handleSubscribeStock()
-                          } else {
-                            setShowStockSubModal(true)
-                          }
-                        }}
+                        onClick={() => setShowStockSubModal(true)}
                         disabled={stockSubLoading}
-                        className="w-full flex items-center justify-center gap-2.5 bg-footer-bg hover:bg-stone-800 text-white px-6 py-4 text-xs font-semibold uppercase tracking-[0.14em] transition-colors shadow-sm disabled:opacity-60"
+                        className="w-full flex items-center justify-center gap-2.5 bg-footer-bg hover:bg-stone-800 text-white px-6 py-4 text-xs font-semibold uppercase tracking-[0.14em] transition-colors shadow-sm disabled:opacity-60 cursor-pointer"
                       >
                         {stockSubLoading ? (
                           <Loader2 size={16} className="animate-spin" />
@@ -3848,8 +3859,6 @@ const ProductDetails = () => {
                         <TranslatedText>
                           {getCurrentSize()
                             ? `Remind Me When Size ${getCurrentSize().code || getCurrentSize().name} is Available`
-                            : user?.email
-                            ? `Remind Me When Available (${user.email})`
                             : "Remind Me When Available"}
                         </TranslatedText>
                       </button>
@@ -4926,28 +4935,26 @@ const ProductDetails = () => {
             </div>
             {isEffectiveOutOfStock() ? (
               isSubscribedToStock ? (
-                <div className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-50 border border-emerald-300 px-3 py-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-emerald-900 text-center">
+                <div
+                  onClick={() => setShowStockSubModal(true)}
+                  className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-50 border border-emerald-300 px-3 py-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-emerald-900 text-center cursor-pointer"
+                  title="Click to change email"
+                >
                   <CheckCircle size={15} className="text-emerald-600 flex-shrink-0" />
                   <span>
                     <TranslatedText>
                       {getCurrentSize()
                         ? `Alert Active (${getCurrentSize().code || getCurrentSize().name})`
-                        : "We'll Email You When In Stock"}
+                        : "We'll Email You"}
                     </TranslatedText>
                   </span>
                 </div>
               ) : (
                 <button
                   type="button"
-                  onClick={() => {
-                    if (user?.email) {
-                      handleSubscribeStock()
-                    } else {
-                      setShowStockSubModal(true)
-                    }
-                  }}
+                  onClick={() => setShowStockSubModal(true)}
                   disabled={stockSubLoading}
-                  className="flex-1 flex items-center justify-center gap-2 bg-footer-bg px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-white disabled:opacity-60"
+                  className="flex-1 flex items-center justify-center gap-2 bg-footer-bg px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-white disabled:opacity-60 cursor-pointer"
                 >
                   {stockSubLoading ? (
                     <Loader2 size={15} className="animate-spin" />
@@ -4956,7 +4963,7 @@ const ProductDetails = () => {
                   )}
                   <TranslatedText>
                     {getCurrentSize()
-                      ? `Remind Me (Size ${getCurrentSize().code || getCurrentSize().name})`
+                      ? `Remind Me (${getCurrentSize().code || getCurrentSize().name})`
                       : "Remind Me When Available"}
                   </TranslatedText>
                 </button>
@@ -5042,6 +5049,11 @@ const ProductDetails = () => {
                 <label className="block text-xs font-semibold uppercase tracking-wider text-stone-700 mb-1.5">
                   <TranslatedText>Your Email Address</TranslatedText>
                 </label>
+                {user?.email && (
+                  <p className="text-[11px] text-stone-500 mb-2">
+                    <TranslatedText>Logged in as</TranslatedText> <span className="font-semibold text-stone-800">{user.email}</span>. <TranslatedText>You can keep this or type a different email below.</TranslatedText>
+                  </p>
+                )}
                 <div className="relative">
                   <Mail size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
                   <input
