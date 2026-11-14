@@ -72,13 +72,40 @@ const config = {
 }
 
 /**
+ * Normalizes phone numbers to clean international format for WhatsApp links:
+ * - Strips all non-digit characters
+ * - Converts local Pakistani numbers (e.g. 0325... or 325...) to 92325...
+ * - Removes leading 00
+ */
+export const formatWhatsAppNumber = (phone) => {
+  if (!phone) return ""
+  let clean = String(phone).replace(/\D/g, "")
+  if (!clean) return ""
+
+  // Remove leading international 00
+  if (clean.startsWith("00")) {
+    clean = clean.slice(2)
+  }
+
+  // Pakistan local format with leading 0 (e.g. 03257847744 -> 923257847744)
+  if (clean.startsWith("0") && clean.length === 11) {
+    clean = "92" + clean.slice(1)
+  } else if (clean.length === 10 && clean.startsWith("3")) {
+    clean = "92" + clean
+  }
+
+  return clean
+}
+
+/**
  * Direct WhatsApp URL generator:
  * - On desktop: uses web.whatsapp.com/send directly so it immediately opens the chat in WhatsApp Web
  *   without stopping at the intermediate "Open app / Continue to WhatsApp Web" landing prompt.
  * - On mobile: uses api.whatsapp.com/send which directly triggers the WhatsApp mobile app.
  */
 export const getWhatsAppUrl = (text = "", customPhone = null) => {
-  const targetPhone = String(customPhone || config.COMPANY_WHATSAPP_NUMBER || "923257847744").replace(/\D/g, "")
+  const rawPhone = customPhone || config.COMPANY_WHATSAPP_NUMBER || "923257847744"
+  const targetPhone = formatWhatsAppNumber(rawPhone) || String(rawPhone).replace(/\D/g, "")
   const encodedText = text ? encodeURIComponent(text) : ""
 
   const isMobile =
@@ -91,6 +118,7 @@ export const getWhatsAppUrl = (text = "", customPhone = null) => {
   return `${baseUrl}?phone=${targetPhone}${encodedText ? `&text=${encodedText}` : ""}`
 }
 
+config.formatWhatsAppNumber = formatWhatsAppNumber
 config.getWhatsAppUrl = getWhatsAppUrl
 
 export default config

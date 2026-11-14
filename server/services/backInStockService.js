@@ -172,11 +172,11 @@ export const notifyBackInStockSubscribers = async (productId) => {
       try {
         // If subscriber requested a specific size, verify that exact size is currently in stock!
         if (sub.size && product.sizes && Array.isArray(product.sizes) && product.sizes.length > 0) {
-          const cleanSubSize = String(sub.size).trim().toLowerCase()
+          const cleanSubSize = String(sub.size).replace(/^size[:\s-]*/i, "").trim().toLowerCase()
           const matchingSize = product.sizes.find(
             (s) =>
-              (s.code && String(s.code).trim().toLowerCase() === cleanSubSize) ||
-              (s.name && String(s.name).trim().toLowerCase() === cleanSubSize),
+              (s.code && String(s.code).replace(/^size[:\s-]*/i, "").trim().toLowerCase() === cleanSubSize) ||
+              (s.name && String(s.name).replace(/^size[:\s-]*/i, "").trim().toLowerCase() === cleanSubSize),
           )
 
           // If size not found or remaining stock <= 0, keep waiting

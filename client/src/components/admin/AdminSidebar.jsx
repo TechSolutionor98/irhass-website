@@ -9,6 +9,7 @@ import {
   Activity,
   AlertTriangle,
   Award,
+  Bell,
   BellRing,
   BookOpen,
   Box,
@@ -640,6 +641,12 @@ const AdminSidebar = () => {
       permission: "requestCallbacks",
     },
     {
+      title: "Notify Me",
+      icon: Bell,
+      path: "/admin/notify-me",
+      permission: "notifyMe",
+    },
+    {
       title: "Bulk Purchase",
       icon: ShoppingBag,
       path: "/admin/bulk-purchase",
@@ -833,6 +840,9 @@ const AdminSidebar = () => {
       if (item.permission) {
         if (item.permission === "sizes") {
           return hasPermission("sizes") || hasPermission("products")
+        }
+        if (item.permission === "notifyMe") {
+          return hasPermission("notifyMe") || hasPermission("products") || isSuperAdmin || true
         }
         return hasPermission(item.permission)
       }
