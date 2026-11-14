@@ -579,9 +579,9 @@ export const scoreSearchRelevance = (product, searchTerm, words) => {
 
 class ProductCacheService {
   constructor() {
-    this.CACHE_KEY = "graba2z_products_cache"
-    this.CACHE_CHUNK_PREFIX = "graba2z_products_chunk_"
-    this.CACHE_VERSION = 4
+    this.CACHE_KEY = "irhaas_products_cache_v5"
+    this.CACHE_CHUNK_PREFIX = "irhaas_products_chunk_v5_"
+    this.CACHE_VERSION = 5
     this.CACHE_EXPIRY = 8 * 60 * 60 * 1000 // 8hrs
     this.MAX_CACHE_SIZE = 1 * 1024 * 1024 // 1MB per chunk (reduced)
     this.MAX_CHUNKS = 20 // More chunks, smaller size

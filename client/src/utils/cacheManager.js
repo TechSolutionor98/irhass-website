@@ -1,7 +1,7 @@
 import axios from "axios"
 import config from "../config/config"
 
-const CACHE_VERSION_KEY = "graba2z_cache_version"
+const CACHE_VERSION_KEY = "irhaas_cache_version_v3"
 
 // Keys that should be preserved during cache reset (exact match)
 const PRESERVED_KEYS = [
