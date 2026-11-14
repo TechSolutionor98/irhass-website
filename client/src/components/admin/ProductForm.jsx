@@ -2163,11 +2163,11 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
         {/* Descriptions */}
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Short Description</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Key Features</label>
             <TipTapEditor
               content={formData.shortDescription}
               onChange={handleShortDescriptionChange}
-              placeholder="Brief product description"
+              placeholder="Enter key features or paste specifications table..."
             />
           </div>
 

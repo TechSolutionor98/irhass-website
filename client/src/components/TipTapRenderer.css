@@ -229,3 +229,107 @@
 [dir="rtl"] .tiptap-content table td {
   text-align: right;
 }
+
+/* ---------------------------------------------------------------- */
+/* Key Features Dropdown Table & Content Styling                   */
+/* ---------------------------------------------------------------- */
+.key-features-content {
+  scrollbar-width: thin;
+  scrollbar-color: #d1d5db transparent;
+}
+
+.key-features-content::-webkit-scrollbar {
+  height: 5px;
+}
+
+.key-features-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.key-features-content::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+/* Compact table sizing */
+.key-features-content table,
+.key-features-content .tiptap-content table {
+  width: 100% !important;
+  min-width: 100% !important;
+  margin: 0.25rem 0 0.5rem 0 !important;
+  font-size: 0.8125rem !important; /* 13px */
+  border: 1px solid #e5e7eb !important;
+  border-collapse: collapse !important;
+  display: table !important;
+}
+
+.key-features-content table tr,
+.key-features-content .tiptap-content table tr {
+  height: auto !important;
+}
+
+.key-features-content table th,
+.key-features-content table td,
+.key-features-content .tiptap-content table th,
+.key-features-content .tiptap-content table td {
+  border: 1px solid #e5e7eb !important;
+  padding: 0.35rem 0.65rem !important; /* Compact vertical row height */
+  vertical-align: middle !important;
+  line-height: 1.35 !important;
+  word-break: normal;
+  height: auto !important;
+}
+
+/* Reset any nested paragraph margins inside table cells */
+.key-features-content table th p,
+.key-features-content table td p,
+.key-features-content .tiptap-content table th p,
+.key-features-content .tiptap-content table td p {
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 1.35 !important;
+  font-size: inherit !important;
+  display: block !important;
+}
+
+.key-features-content table th,
+.key-features-content .tiptap-content table th {
+  background-color: #f9fafb !important;
+  font-weight: 600 !important;
+  color: #1f2937 !important;
+  font-size: 0.75rem !important;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-top: 0.45rem !important;
+  padding-bottom: 0.45rem !important;
+}
+
+.key-features-content table tr:nth-child(even) td,
+.key-features-content .tiptap-content table tr:nth-child(even) td {
+  background-color: #fafafa !important;
+}
+
+.key-features-content table tr:hover td,
+.key-features-content .tiptap-content table tr:hover td {
+  background-color: #f3f4f6 !important;
+}
+
+.key-features-content .tiptap-content img {
+  max-width: 100% !important;
+  height: auto !important;
+  margin: 0.5rem 0 !important;
+}
+
+.key-features-content .tiptap-content p {
+  font-size: 0.875rem !important;
+  line-height: 1.5 !important;
+  margin: 0.35rem 0 !important;
+}
+
+[dir="rtl"] .key-features-content table th,
+[dir="rtl"] .key-features-content table td,
+[dir="rtl"] .key-features-content .tiptap-content table th,
+[dir="rtl"] .key-features-content .tiptap-content table td {
+  text-align: right !important;
+}
+

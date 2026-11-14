@@ -234,6 +234,14 @@ const ProductDetails = () => {
   const [stockSubLoading, setStockSubLoading] = useState(false)
   const [showStockSubModal, setShowStockSubModal] = useState(false)
 
+  // Key Features collapsible state (closed by default)
+  const [keyFeaturesOpen, setKeyFeaturesOpen] = useState(false)
+
+  // Reset Key Features collapsible when switching products
+  useEffect(() => {
+    setKeyFeaturesOpen(false)
+  }, [product?._id])
+
   // Sync user info when logged in or from previously saved details
   useEffect(() => {
     if (user?.email) {
@@ -3805,17 +3813,40 @@ const ProductDetails = () => {
               )}
 
 
-                  {/* Key Features */}
+              {/* Key Features Accordion (Collapsible) */}
               {keyFeaturesContent && (
-                <div className="mb-6">
-                  <h3 className="mb-3 text-xs font-medium uppercase tracking-[0.14em] text-stone-500"><TranslatedText>Key Features</TranslatedText></h3>
-                  <div className="prose prose-sm md:prose-base max-w-none leading-relaxed text-stone-700">
-                  <TranslatedTipTapRenderer 
-                    content={keyFeaturesContent}
-                    sourceDoc={product} 
-                    fieldName={keyFeaturesFieldName}
-                  />
-                </div>
+                <div className="mb-5 border border-stone-200 bg-white">
+                  <button
+                    type="button"
+                    onClick={() => setKeyFeaturesOpen((prev) => !prev)}
+                    aria-expanded={keyFeaturesOpen}
+                    className="flex w-full items-center justify-between px-4 py-3.5 text-left bg-stone-50/70 hover:bg-stone-100/80 transition-colors"
+                  >
+                    <span className="text-xs font-semibold uppercase tracking-[0.14em] text-stone-800">
+                      <TranslatedText>Key Features</TranslatedText>
+                    </span>
+                    <ChevronDown
+                      size={18}
+                      strokeWidth={1.75}
+                      className={`text-stone-500 transition-transform duration-200 ${
+                        keyFeaturesOpen ? "rotate-180" : ""
+                      }`}
+                    />
+                  </button>
+
+                  {keyFeaturesOpen && (
+                    <div className="border-t border-stone-200 p-4 bg-white">
+                      <div className="key-features-content overflow-x-auto max-w-full [&_table]:!w-full [&_table]:!my-1.5 [&_table_th]:!py-1.5 [&_table_th]:!px-3 [&_table_td]:!py-1.5 [&_table_td]:!px-3 [&_table_p]:!my-0 [&_table_p]:!py-0 [&_table_p]:!leading-tight">
+                        <div className="prose prose-sm max-w-none text-stone-700 leading-normal">
+                          <TranslatedTipTapRenderer 
+                            content={keyFeaturesContent}
+                            sourceDoc={product} 
+                            fieldName={keyFeaturesFieldName}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               {/* Delivery promise. This is where the reference layout puts its
