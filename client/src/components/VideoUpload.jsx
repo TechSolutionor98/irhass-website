@@ -28,9 +28,9 @@ const VideoUpload = ({ onVideoUpload, currentVideo, label = "Upload Video" }) =>
       return
     }
 
-    // Validate file size (100MB max)
+    // Validate file size (100MB maximum)
     if (file.size > 100 * 1024 * 1024) {
-      alert("Video file size must be less than 100MB")
+      alert(`Video file size is ${(file.size / (1024 * 1024)).toFixed(1)}MB. Maximum allowed is 100MB. Please compress the video or paste a direct video URL.`)
       return
     }
 
@@ -70,7 +70,16 @@ const VideoUpload = ({ onVideoUpload, currentVideo, label = "Upload Video" }) =>
       console.error("❌ Video upload error:", error)
       console.error("❌ Error response:", error.response?.data)
 
-      const errorMessage = error.response?.data?.message || error.message || "Upload failed"
+      let errorMessage = "Upload failed"
+      if (error.response?.status === 413) {
+        errorMessage = "Video file exceeds server limit (100MB). Please compress the video."
+      } else if (error.code === "ERR_NETWORK" || !error.response) {
+        errorMessage = "Network error: Upload failed or timed out. Please ensure your video is under 100MB and your VPS Nginx client_max_body_size is set to 100M+."
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message
+      } else if (error.message) {
+        errorMessage = error.message
+      }
       alert(`Video upload failed: ${errorMessage}`)
     } finally {
       setUploading(false)

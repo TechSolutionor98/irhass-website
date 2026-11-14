@@ -337,8 +337,8 @@ app.use(
 )
 
 // Body parser middleware
-app.use(express.json({ limit: "50mb" }))
-app.use(express.urlencoded({ extended: true, limit: "50mb" }))
+app.use(express.json({ limit: "100mb" }))
+app.use(express.urlencoded({ extended: true, limit: "100mb" }))
 
 // Attach cache service to all requests
 app.use(attachCacheService)
@@ -491,6 +491,10 @@ const server = app.listen(PORT, () => {
     console.error("[campaignSender] could not check for interrupted campaigns:", error),
   )
 })
+
+server.timeout = 300000 // 5 minutes for large 100MB uploads
+server.keepAliveTimeout = 65000
+server.headersTimeout = 66000
 
 server.on("error", (error) => {
   if (error.code === "EADDRINUSE") {

@@ -161,8 +161,13 @@ const AdminBanners = () => {
       return
     }
 
-    if (file.size > 100 * 1024 * 1024) {
-      setVideoUploadError("Video file size must be less than 100MB.")
+    // 100MB maximum video upload limit
+    const MAX_VIDEO_BYTES = 100 * 1024 * 1024
+    if (file.size > MAX_VIDEO_BYTES) {
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(1)
+      setVideoUploadError(
+        `Video file size is ${sizeMB}MB, which exceeds the 100MB limit. Please compress the video or paste a direct video URL.`
+      )
       return
     }
 
@@ -207,9 +212,11 @@ const AdminBanners = () => {
       console.error("Video upload failed:", err)
       let errorMsg = "Failed to upload video."
       if (err.response?.status === 413) {
-        errorMsg = "Video file is too large for the server limit. Please compress the video or enter a direct video URL."
+        errorMsg = "Video file is too large for the server limit (100MB). Please compress the video or enter a direct video URL."
       } else if (err.response?.status === 401) {
         errorMsg = "Authentication failed. Please re-login to Admin."
+      } else if (err.code === "ERR_NETWORK" || !err.response) {
+        errorMsg = "Network error: Upload failed or timed out. Please ensure your video is under 100MB and your VPS Nginx client_max_body_size is set to 100M+."
       } else if (err.response?.data?.message) {
         errorMsg = err.response.data.message
       } else if (err.message) {
