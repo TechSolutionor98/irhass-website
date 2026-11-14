@@ -5181,7 +5181,7 @@ const ProductDetails = () => {
                     required
                     value={stockSubPhone}
                     onChange={(e) => setStockSubPhone(e.target.value)}
-                    placeholder="e.g. 0325 7847744"
+                    placeholder="Enter your WhatsApp number"
                     className="w-full pl-10 pr-4 py-2.5 border border-stone-300 text-sm focus:border-stone-900 focus:outline-none"
                   />
                 </div>
