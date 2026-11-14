@@ -270,14 +270,11 @@ const BlogList = () => {
     ? blogs.filter((blog) => blog.blogCategory?._id === selectedCategory || blog.mainCategory?._id === selectedCategory)
     : blogs
 
-  const bounceStyle = {
-    animation: "bounce 1s infinite",
-  }
-
   if (loading && blogs.length === 0 && featuredBlogs.length === 0 && trendingBlogs.length === 0) {
     return (
-      <div className="flex justify-center items-center h-96">
-        <img src="/logo.png" alt="Loading..." style={{ width: 80, height: 80, ...bounceStyle }} />
+      <div className="flex flex-col justify-center items-center min-h-[50vh] gap-3">
+        <div className="w-9 h-9 border-2 border-stone-200 border-t-stone-900 rounded-full animate-spin" />
+        <span className="text-[11px] uppercase tracking-[0.2em] text-stone-400 font-medium">Loading Articles</span>
       </div>
     )
   }

@@ -3479,7 +3479,7 @@ const Checkout = () => {
                   >
                     {loading ? (
                       <>
-                        <img src="/logo.png" alt="Loading..." style={{ width: 20, height: 20, animation: "bounce 1s infinite" }} />
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                         <TranslatedText>Processing...</TranslatedText>
                       </>
                     ) : deliveryBlocked ? (
@@ -3780,11 +3780,7 @@ const Checkout = () => {
               >
                 {loading ? (
                   <>
-                    <img
-                      src="/logo.png"
-                      alt="Loading..."
-                      style={{ width: 24, height: 24, animation: "bounce 1s infinite" }}
-                    />
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                     <TranslatedText>Processing...</TranslatedText>
                   </>
                 ) : deliveryBlocked ? (

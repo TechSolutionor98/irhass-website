@@ -2679,8 +2679,9 @@ const ProductDetails = () => {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center h-96">
-        <img src="/logo.png" alt="Loading" className="w-24 h-24 animate-bounce" style={{ animationDuration: "1.5s" }} />
+      <div className="flex flex-col justify-center items-center min-h-[60vh] gap-3">
+        <div className="w-9 h-9 border-2 border-stone-200 border-t-stone-900 rounded-full animate-spin" />
+        <span className="text-[11px] uppercase tracking-[0.2em] text-stone-400 font-medium">Loading</span>
       </div>
     )
   }
