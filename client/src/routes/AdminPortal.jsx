@@ -1,19 +1,21 @@
+import { Suspense } from "react"
 import { Navigate, Route, Routes } from "react-router-dom"
+import { lazyWithRetry } from "../utils/lazyWithRetry"
 
 import AdminRoute from "../components/AdminRoute"
 import AdminHeader from "../components/admin/AdminHeader"
 import AdminSidebar from "../components/admin/AdminSidebar"
 
 import NotFound from "../pages/NotFound"
-import CreateOrder from "../pages/admin/CreateOrder"
+const CreateOrder = lazyWithRetry(() => import("../pages/admin/CreateOrder"))
 import ActivityLogs from "../pages/admin/ActivityLogs"
 import AddBannerCard from "../pages/admin/AddBannerCard"
-import AddBlog from "../pages/admin/AddBlog"
+const AddBlog = lazyWithRetry(() => import("../pages/admin/AddBlog"))
 import AddBlogBrand from "../pages/admin/AddBlogBrand"
 import AddBlogCategory from "../pages/admin/AddBlogCategory"
 import AddBlogTopic from "../pages/admin/AddBlogTopic"
 import AddBrand from "../pages/admin/AddBrand"
-import AddBulkProducts from "../pages/admin/AddBulkProducts"
+const AddBulkProducts = lazyWithRetry(() => import("../pages/admin/AddBulkProducts"))
 import AddCategory from "../pages/admin/AddCategory"
 import AddColor from "../pages/admin/AddColor"
 import AddDeliveryCharge from "../pages/admin/AddDeliveryCharge"
@@ -22,7 +24,7 @@ import AddOfferBrand from "../pages/admin/AddOfferBrand"
 import AddOfferCategory from "../pages/admin/AddOfferCategory"
 import AddOfferPage from "../pages/admin/AddOfferPage"
 import AddOfferProduct from "../pages/admin/AddOfferProduct"
-import AddProduct from "../pages/admin/AddProduct"
+const AddProduct = lazyWithRetry(() => import("../pages/admin/AddProduct"))
 import AddSize from "../pages/admin/AddSize"
 import AddSubCategory from "../pages/admin/AddSubCategory"
 import AddTax from "../pages/admin/AddTax"
@@ -31,33 +33,33 @@ import AddVolume from "../pages/admin/AddVolume"
 import AddWarranty from "../pages/admin/AddWarranty"
 import AdminBannerCards from "../pages/admin/AdminBannerCards"
 import AdminBanners from "../pages/admin/AdminBanners"
-import AdminBlogs from "../pages/admin/AdminBlogs"
+const AdminBlogs = lazyWithRetry(() => import("../pages/admin/AdminBlogs"))
 import AdminBrands from "../pages/admin/AdminBrands"
 import AdminBulkPurchase from "../pages/admin/AdminBulkPurchase"
 import AdminCategories from "../pages/admin/AdminCategories"
 import AdminCategorySlider from "../pages/admin/AdminCategorySlider"
 import AdminColors from "../pages/admin/AdminColors"
-import AdminDashboard from "../pages/admin/AdminDashboard"
+const AdminDashboard = lazyWithRetry(() => import("../pages/admin/AdminDashboard"))
 import AdminDeliveryCharges from "../pages/admin/AdminDeliveryCharges"
-import AdminEmailTemplates from "../pages/admin/AdminEmailTemplates"
-import EmailDesigns from "../pages/admin/EmailDesigns"
-import EmailBuilder from "../pages/admin/EmailBuilder"
-import BulkMails from "../pages/admin/BulkMails"
+const AdminEmailTemplates = lazyWithRetry(() => import("../pages/admin/AdminEmailTemplates"))
+const EmailDesigns = lazyWithRetry(() => import("../pages/admin/EmailDesigns"))
+const EmailBuilder = lazyWithRetry(() => import("../pages/admin/EmailBuilder"))
+const BulkMails = lazyWithRetry(() => import("../pages/admin/BulkMails"))
 import AdminManagement from "../pages/admin/AdminManagement"
 import AdminNewsletter from "../pages/admin/AdminNewsletter"
-import AdminProducts from "../pages/admin/AdminProducts"
-import Inventory from "../pages/admin/Inventory"
+const AdminProducts = lazyWithRetry(() => import("../pages/admin/AdminProducts"))
+const Inventory = lazyWithRetry(() => import("../pages/admin/Inventory"))
 import CreateLabels from "../pages/admin/CreateLabels"
 import AdminProductOptionManager from "../pages/admin/AdminProductOptionManager"
 import AdminRequestCallbacks from "../pages/admin/AdminRequestCallbacks"
 import AdminNotifyMe from "../pages/admin/AdminNotifyMe"
-import AdminReviews from "../pages/admin/AdminReviews"
-import AdminReviewsApproved from "../pages/admin/AdminReviewsApproved"
-import AdminReviewsPending from "../pages/admin/AdminReviewsPending"
-import AdminReviewsRejected from "../pages/admin/AdminReviewsRejected"
-import AdminPageSEOManager from "../pages/admin/AdminPageSEOManager"
-import AdminHomePageSEO from "../pages/admin/AdminHomePageSEO"
-import AdminSEOSettings from "../pages/admin/AdminSEOSettings"
+const AdminReviews = lazyWithRetry(() => import("../pages/admin/AdminReviews"))
+const AdminReviewsApproved = lazyWithRetry(() => import("../pages/admin/AdminReviewsApproved"))
+const AdminReviewsPending = lazyWithRetry(() => import("../pages/admin/AdminReviewsPending"))
+const AdminReviewsRejected = lazyWithRetry(() => import("../pages/admin/AdminReviewsRejected"))
+const AdminPageSEOManager = lazyWithRetry(() => import("../pages/admin/AdminPageSEOManager"))
+const AdminHomePageSEO = lazyWithRetry(() => import("../pages/admin/AdminHomePageSEO"))
+const AdminSEOSettings = lazyWithRetry(() => import("../pages/admin/AdminSEOSettings"))
 import AdminBingIndexer from "../pages/admin/AdminBingIndexer"
 import AdminArabicConversion from "../pages/admin/AdminArabicConversion"
 import AdminCountryManager from "../pages/admin/AdminCountryManager"
@@ -92,8 +94,8 @@ import BlogDashboard from "../pages/admin/BlogDashboard"
 import BlogRating from "../pages/admin/BlogRating"
 import BlogTopics from "../pages/admin/BlogTopics"
 import BuyerProtectionAdmin from "../pages/admin/BuyerProtectionAdmin"
-import CriticalOrders from "../pages/admin/CriticalOrders"
-import EditBlog from "../pages/admin/EditBlog"
+const CriticalOrders = lazyWithRetry(() => import("../pages/admin/CriticalOrders"))
+const EditBlog = lazyWithRetry(() => import("../pages/admin/EditBlog"))
 import EditBlogBrand from "../pages/admin/EditBlogBrand"
 import EditBlogCategory from "../pages/admin/EditBlogCategory"
 import EditBlogTopic from "../pages/admin/EditBlogTopic"
@@ -102,11 +104,11 @@ import EditSubCategory from "../pages/admin/EditSubCategory"
 import ManageBlogComments from "../pages/admin/ManageBlogComments"
 import OfferPages from "../pages/admin/OfferPages"
 import OnlineOrders from "../pages/admin/OnlineOrders"
-import PriceAdjustment from "../pages/admin/PriceAdjustment"
-import PriceAdjustmentReports from "../pages/admin/PriceAdjustmentReports"
+const PriceAdjustment = lazyWithRetry(() => import("../pages/admin/PriceAdjustment"))
+const PriceAdjustmentReports = lazyWithRetry(() => import("../pages/admin/PriceAdjustmentReports"))
 import RecentQuotation from "../pages/admin/RecentQuotation"
-import Orders from "../pages/admin/Orders"
-import WholesaleOrders from "../pages/admin/WholesaleOrders"
+const Orders = lazyWithRetry(() => import("../pages/admin/Orders"))
+const WholesaleOrders = lazyWithRetry(() => import("../pages/admin/WholesaleOrders"))
 import Rejected from "../pages/admin/Rejected"
 import ResetCache from "../pages/admin/ResetCache"
 import AdminWhatsApp from "../pages/admin/AdminWhatsApp"
@@ -123,7 +125,14 @@ const AdminPortal = () => {
         <AdminSidebar />
         <AdminHeader />
         <div className=" ">
-          <Routes>
+          <Suspense
+            fallback={
+              <div className="flex min-h-[60vh] items-center justify-center">
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-stone-200 border-t-stone-800" />
+              </div>
+            }
+          >
+            <Routes>
             <Route path="dashboard" element={<AdminDashboard />} />
             <Route path="products" element={<AdminProducts />} />
             <Route path="inventory" element={<Inventory />} />
@@ -338,6 +347,7 @@ const AdminPortal = () => {
             <Route path="activity-logs" element={<ActivityLogs />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
+          </Suspense>
         </div>
       </div>
     </AdminRoute>

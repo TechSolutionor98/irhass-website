@@ -86,6 +86,7 @@ export default defineConfig({
           'vendor-ui': ['lucide-react', 'react-icons'],
           'vendor-forms': ['react-hook-form', 'react-select'],
           'vendor-utils': ['axios'],
+          'vendor-editor': ['@tiptap/react', '@tiptap/starter-kit', '@tiptap/core'],
         },
       },
     },

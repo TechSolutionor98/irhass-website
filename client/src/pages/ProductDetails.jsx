@@ -57,7 +57,7 @@ import FeaturedProducts from "../components/FeaturedProducts"
 import TranslatedText from "../components/TranslatedText"
 import { preloadTranslations } from "../LanguageModel/translationService"
 
-const WHATSAPP_NUMBER = config.COMPANY_WHATSAPP_NUMBER || "923257847744"
+const WHATSAPP_NUMBER = config.COMPANY_WHATSAPP_NUMBER || "923214980835"
 const TRANSLATION_SKIP_TAGS = new Set(["CODE", "PRE", "KBD", "SAMP", "SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "OPTION"])
 
 const isWorthTranslating = (text) => {
@@ -355,34 +355,21 @@ const ProductDetails = () => {
       setShowStockSubModal(false)
 
       // 2. Open WhatsApp chat with pre-filled bilingual message to company number
-      const companyWaNumber = (config.COMPANY_WHATSAPP_NUMBER || "923257847744").replace(/\D/g, "")
+      const companyWaNumber = (config.COMPANY_WHATSAPP_NUMBER || "923214980835").replace(/\D/g, "")
       // Always point to live website URL so recipient/user can open it from anywhere
       const liveBase = (config.SITE_URL || "https://irhaas.com").replace(/\/$/, "")
       const productPageUrl = `${liveBase}/product/${encodeURIComponent(product.slug || product._id)}`
-      const priceText = formatCurrencyPrice ? formatCurrencyPrice(getEffectivePrice()) : `${getEffectivePrice()} Rs`
-      const currentDateTime = new Date().toLocaleString("en-PK", {
-        timeZone: "Asia/Karachi",
-        dateStyle: "medium",
-        timeStyle: "short",
-      })
 
       const waLines = [
-        "🔔 *RESTOCK NOTIFICATION REQUEST*",
+        "🔔 *RESTOCK ALERT REQUEST*",
         "*اسٹاک الرٹ کی درخواست*",
-        "------------------------------------",
-        `🛍️ *Product / پروڈکٹ:* ${product.name || ""}`,
-        `📏 *Size / سائز:* ${sizeLabel ? sizeLabel : "Standard / In-Stock Query"}`,
-        `💰 *Price / قیمت:* ${priceText}`,
-        `🔗 *Product Link:* ${productPageUrl}`,
         "",
-        "👤 *Customer Information / صارف کی تفصیلات:*",
-        `• *Name / نام:* ${targetName}`,
-        `• *Phone / فون:* ${targetPhone}`,
-        `• *Email / ای میل:* ${targetEmail}`,
-        `• *Date & Time / تاریخ:* ${currentDateTime}`,
-        "------------------------------------",
-        "Please notify me on WhatsApp as soon as this item is back in stock!",
-        "براہ کرم جب یہ پروڈکٹ یا سائز دوبارہ اسٹاک میں آئے تو مجھے واٹس ایپ پر مطلع فرمائیں۔ شکریہ!",
+        `*Product:* ${product.name || ""}`,
+        `*Size:* ${sizeLabel ? sizeLabel : "Standard"}`,
+        `*Product Link:* ${productPageUrl}`,
+        "",
+        "Please notify me when this product is back in stock. I’m interested in purchasing it.",
+        "برائے مہربانی جب یہ پروڈکٹ دوبارہ اسٹاک میں آئے تو مجھے مطلع کریں۔ میں اسے خریدنے میں دلچسپی رکھتا/رکھتی ہوں۔",
       ]
 
       const waMessage = waLines.join("\n")

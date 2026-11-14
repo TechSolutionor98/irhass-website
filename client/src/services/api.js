@@ -106,7 +106,7 @@ export const productsAPI = {
     return apiRequest(`/api/products${queryString ? `?${queryString}` : ""}`)
   },
 
-  getById: (id) => apiRequest(`/api/products/${id}?_t=${Date.now()}`),
+  getById: (id) => apiRequest(`/api/products/${id}`),
 
   create: (productData) =>
     apiRequest("/api/products", {

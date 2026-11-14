@@ -132,6 +132,79 @@ const translateText = async (text) => {
   }
 }
 
+// Background asynchronous product translator so admin save/update requests return in <100ms
+const syncProductTranslationsInBackground = (productId, payload = {}) => {
+  if (!ENABLE_PRODUCT_TRANSLATION || !productId) return
+  setImmediate(async () => {
+    try {
+      const updateAr = {}
+      if (payload.name && typeof payload.name === "string") {
+        const ar = await translateText(payload.name)
+        if (ar) updateAr.nameAr = ar
+      }
+      if (payload.description && typeof payload.description === "string") {
+        const ar = await translateText(payload.description)
+        if (ar) updateAr.descriptionAr = ar
+      }
+      if (payload.shortDescription && typeof payload.shortDescription === "string") {
+        const ar = await translateText(payload.shortDescription)
+        if (ar) updateAr.shortDescriptionAr = ar
+      }
+      if (payload.stockStatus && typeof payload.stockStatus === "string") {
+        const ar = await translateText(payload.stockStatus)
+        if (ar) updateAr.stockStatusAr = ar
+      }
+      if (payload.selfVariationText && typeof payload.selfVariationText === "string") {
+        const ar = await translateText(payload.selfVariationText)
+        if (ar) updateAr.selfVariationTextAr = ar
+      }
+      if (payload.reverseVariationText && typeof payload.reverseVariationText === "string") {
+        const ar = await translateText(payload.reverseVariationText)
+        if (ar) updateAr.reverseVariationTextAr = ar
+      }
+      if (payload.selfAvailableModelText && typeof payload.selfAvailableModelText === "string") {
+        const ar = await translateText(payload.selfAvailableModelText)
+        if (ar) updateAr.selfAvailableModelTextAr = ar
+      }
+      if (Array.isArray(payload.tags) && payload.tags.length > 0) {
+        const translatedTags = await Promise.all(payload.tags.map((t) => translateText(t)))
+        const validTags = translatedTags.filter(Boolean)
+        if (validTags.length > 0) updateAr.tagsAr = validTags
+      }
+      if (Array.isArray(payload.specifications) && payload.specifications.length > 0) {
+        updateAr.specifications = await Promise.all(
+          payload.specifications.map(async (spec) => ({
+            ...spec,
+            keyAr: spec.keyAr || (spec.key ? await translateText(spec.key) : ""),
+            valueAr: spec.valueAr || (spec.value ? await translateText(spec.value) : ""),
+          }))
+        )
+      }
+      if (Array.isArray(payload.variations) && payload.variations.length > 0) {
+        updateAr.variations = await Promise.all(
+          payload.variations.map(async (v) => ({
+            ...v,
+            variationTextAr: v.variationTextAr || (v.variationText ? await translateText(v.variationText) : ""),
+          }))
+        )
+      }
+      if (Array.isArray(payload.availableModels) && payload.availableModels.length > 0) {
+        updateAr.availableModels = await Promise.all(
+          payload.availableModels.map(async (m) => ({
+            ...m,
+            variationTextAr: m.variationTextAr || (m.variationText ? await translateText(m.variationText) : ""),
+          }))
+        )
+      }
+      if (Object.keys(updateAr).length > 0) {
+        await Product.updateOne({ _id: productId }, { $set: updateAr })
+      }
+    } catch (err) {
+      console.error(`[Background Translation] Product ${productId} error:`, err?.message || err)
+    }
+  })
+}
+
 // Multer setup for Excel parsing (use memory storage for Vercel compatibility)
 const excelUpload = multer({ storage: multer.memoryStorage() })
 const BULK_IMPORT_MAX_IMAGES = 200
@@ -1869,10 +1942,11 @@ router.put(
 router.get(
   "/:id",
   asyncHandler(async (req, res) => {
-    res.set("Cache-Control", "no-cache, no-store, must-revalidate")
+    res.set("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
     const product = await Product.findById(req.params.id)
       .populate("category", "name nameAr slug")
       .populate("brand", "name nameAr")
+      .lean()
 
     if (product && product.isActive) {
       res.json(product)
@@ -1889,7 +1963,7 @@ router.get(
 router.get(
   "/slug/:slug",
   asyncHandler(async (req, res) => {
-    res.set("Cache-Control", "no-cache, no-store, must-revalidate")
+    res.set("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
     const rawSlug = typeof req.params.slug === "string" ? req.params.slug : ""
     let decodedSlug = rawSlug
     try {
@@ -1906,7 +1980,6 @@ router.get(
     const product = await Product.findOne({ 
       slug: { $in: slugCandidates }, 
       isActive: true 
-      // Note: We don't filter by hideFromShop here because hidden products should be accessible via direct link
     })
       .populate("parentCategory", "name nameAr slug")
       .populate("category", "name nameAr slug")
@@ -1917,13 +1990,12 @@ router.get(
       .populate({
         path: "variations.product",
         select: "name nameAr slug image price buyingPrice offerPrice sku isActive hideFromShop selfVariationText selfVariationTextAr reverseVariationText reverseVariationTextAr",
-        // Populate all variation products regardless of hideFromShop status
-        // This ensures hidden variations are visible in the variations section
       })
       .populate({
         path: "availableModels.product",
         select: "name nameAr slug image price buyingPrice offerPrice sku isActive hideFromShop selfAvailableModelText selfAvailableModelTextAr",
       })
+      .lean()
 
     if (product) {
       res.json(product)
@@ -2103,68 +2175,15 @@ router.post(
     productData.barcode = normalizedBarcode
     productData.gtin = normalizedGTIN
 
-    // Translate product fields
-    let nameAr = "";
-    let descriptionAr = "";
-    let shortDescriptionAr = "";
-    let tagsAr = [];
-
-    if (productData.name) {
-      nameAr = await translateText(productData.name);
-    }
-    if (productData.description) {
-      descriptionAr = await translateText(productData.description);
-    }
-    if (productData.shortDescription) {
-      shortDescriptionAr = await translateText(productData.shortDescription);
-    }
-    if (productData.tags && Array.isArray(productData.tags)) {
-      tagsAr = await Promise.all(productData.tags.map(t => translateText(t)));
-    }
-
-    // Translate specifications
-    if (productData.specifications && Array.isArray(productData.specifications)) {
-      for (const spec of productData.specifications) {
-        if (spec.key && !spec.keyAr) spec.keyAr = await translateText(spec.key);
-        if (spec.value && !spec.valueAr) spec.valueAr = await translateText(spec.value);
-      }
-    }
-
-    // Translate stock status
-    let stockStatusAr = "";
-    if (productData.stockStatus) {
-      stockStatusAr = await translateText(productData.stockStatus);
-    }
-
-    // Translate variation texts
-    let reverseVariationTextAr = "";
-    let selfVariationTextAr = "";
-    let selfAvailableModelTextAr = "";
-    if (productData.reverseVariationText) {
-      reverseVariationTextAr = await translateText(productData.reverseVariationText);
-    }
-    if (productData.selfVariationText) {
-      selfVariationTextAr = await translateText(productData.selfVariationText);
-    }
-    if (productData.selfAvailableModelText) {
-      selfAvailableModelTextAr = await translateText(productData.selfAvailableModelText);
-    }
-
-    if (productData.variations && Array.isArray(productData.variations)) {
-      for (const v of productData.variations) {
-        if (v.variationText && !v.variationTextAr) {
-          v.variationTextAr = await translateText(v.variationText);
-        }
-      }
-    }
-
-    if (productData.availableModels && Array.isArray(productData.availableModels)) {
-      for (const model of productData.availableModels) {
-        if (model.variationText && !model.variationTextAr) {
-          model.variationTextAr = await translateText(model.variationText);
-        }
-      }
-    }
+    // Use Arabic fields if already provided in payload
+    let nameAr = productData.nameAr || "";
+    let descriptionAr = productData.descriptionAr || "";
+    let shortDescriptionAr = productData.shortDescriptionAr || "";
+    let tagsAr = Array.isArray(productData.tagsAr) ? productData.tagsAr : [];
+    let stockStatusAr = productData.stockStatusAr || "";
+    let reverseVariationTextAr = productData.reverseVariationTextAr || "";
+    let selfVariationTextAr = productData.selfVariationTextAr || "";
+    let selfAvailableModelTextAr = productData.selfAvailableModelTextAr || "";
 
     if (productData.sizes && Array.isArray(productData.sizes)) {
       productData.sizes = productData.sizes
@@ -2216,6 +2235,9 @@ router.post(
     })
 
     const createdProduct = await product.save()
+    
+    // Asynchronously translate fields in the background without holding up the response
+    syncProductTranslationsInBackground(createdProduct._id, productData)
     
     // Bidirectional variation sync: Update all related products
     if (productData.variations && Array.isArray(productData.variations)) {
@@ -2465,58 +2487,6 @@ router.put(
         product[key] = updateData[key]
       }
 
-      // Translate updated fields
-      if (updateData.name !== undefined) product.nameAr = await translateText(product.name);
-      if (updateData.description !== undefined) product.descriptionAr = await translateText(product.description);
-      if (updateData.shortDescription !== undefined) product.shortDescriptionAr = await translateText(product.shortDescription);
-      if (updateData.tags !== undefined) {
-        if (Array.isArray(product.tags)) {
-          product.tagsAr = await Promise.all(product.tags.map(t => translateText(t)));
-        } else {
-          product.tagsAr = [];
-        }
-      }
-
-      // Translate specifications
-      if (updateData.specifications !== undefined && Array.isArray(product.specifications)) {
-        for (const spec of product.specifications) {
-          if (spec.key && !spec.keyAr) spec.keyAr = await translateText(spec.key);
-          if (spec.value && !spec.valueAr) spec.valueAr = await translateText(spec.value);
-        }
-      }
-
-      // Translate stock status
-      if (updateData.stockStatus !== undefined) {
-        product.stockStatusAr = await translateText(product.stockStatus);
-      }
-
-      // Translate variation texts
-      if (updateData.reverseVariationText !== undefined) {
-        product.reverseVariationTextAr = await translateText(product.reverseVariationText);
-      }
-      if (updateData.selfVariationText !== undefined) {
-        product.selfVariationTextAr = await translateText(product.selfVariationText);
-      }
-      if (updateData.selfAvailableModelText !== undefined) {
-        product.selfAvailableModelTextAr = await translateText(product.selfAvailableModelText);
-      }
-
-      if (updateData.variations !== undefined && Array.isArray(product.variations)) {
-        for (const v of product.variations) {
-          if (v.variationText && !v.variationTextAr) {
-            v.variationTextAr = await translateText(v.variationText);
-          }
-        }
-      }
-
-      if (updateData.availableModels !== undefined && Array.isArray(product.availableModels)) {
-        for (const model of product.availableModels) {
-          if (model.variationText && !model.variationTextAr) {
-            model.variationTextAr = await translateText(model.variationText);
-          }
-        }
-      }
-
       if (parentCategory) product.parentCategory = parentCategory
       if (category) {
         product.category = category
@@ -2538,6 +2508,9 @@ router.put(
       )
 
       const updatedProduct = await product.save()
+
+      // Asynchronously translate fields in the background without holding up the response
+      syncProductTranslationsInBackground(updatedProduct._id, updateData)
       
       // Bidirectional variation sync: Update all related products
       if (updateData.variations && Array.isArray(updateData.variations)) {

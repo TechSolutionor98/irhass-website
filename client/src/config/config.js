@@ -67,8 +67,8 @@ const config = {
   // Centralized WhatsApp Number
   // Used across the entire site (floating button, maintenance, restock alerts, inquiries).
   // Can be overridden via VITE_WHATSAPP_NUMBER in .env
-  COMPANY_WHATSAPP_NUMBER: (import.meta.env?.VITE_WHATSAPP_NUMBER || "923257847744").replace(/\D/g, ""),
-  COMPANY_WHATSAPP_DISPLAY: "+92 325 7847744",
+  COMPANY_WHATSAPP_NUMBER: (import.meta.env?.VITE_WHATSAPP_NUMBER || "923214980835").replace(/\D/g, ""),
+  COMPANY_WHATSAPP_DISPLAY: "+92 321 4980835",
 }
 
 /**
@@ -104,7 +104,7 @@ export const formatWhatsAppNumber = (phone) => {
  * - On mobile: uses api.whatsapp.com/send which directly triggers the WhatsApp mobile app.
  */
 export const getWhatsAppUrl = (text = "", customPhone = null) => {
-  const rawPhone = customPhone || config.COMPANY_WHATSAPP_NUMBER || "923257847744"
+  const rawPhone = customPhone || config.COMPANY_WHATSAPP_NUMBER || "923214980835"
   const targetPhone = formatWhatsAppNumber(rawPhone) || String(rawPhone).replace(/\D/g, "")
   const encodedText = text ? encodeURIComponent(text) : ""
 

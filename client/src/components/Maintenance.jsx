@@ -7,7 +7,7 @@ const MaintenancePage = () => {
 
   const handleContactUs = () => {
     // Open WhatsApp with the centralized company number (direct to chat)
-    const waNumber = config.COMPANY_WHATSAPP_NUMBER || "923257847744";
+    const waNumber = config.COMPANY_WHATSAPP_NUMBER || "923214980835";
     const waUrl = config.getWhatsAppUrl
       ? config.getWhatsAppUrl("", waNumber)
       : `https://web.whatsapp.com/send?phone=${waNumber}`;

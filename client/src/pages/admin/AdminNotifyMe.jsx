@@ -181,25 +181,15 @@ const AdminNotifyMe = () => {
     const priceText = item.product?.price ?? item.metadata?.productPrice ?? ""
 
     const messageLines = [
-      `🌟 *IRHA'S WARDROBE — RESTOCK ALERT*`,
-      `*اسٹاک الرٹ — ارہا'ز وارڈروب*`,
-      `----------------------------------------`,
-      `Assalam-o-Alaikum / Hello *${item.name || "Customer"}*,`,
+      `🔔 *RESTOCK ALERT*`,
+      `*اسٹاک الرٹ*`,
       ``,
-      `Good news! The item you were waiting for is now *BACK IN STOCK*! ✨`,
-      `خوشخبری! آپ کی مطلوبہ پروڈکٹ دوبارہ اسٹاک میں دستیاب ہے!`,
+      `*Product:* ${productName}`,
+      `*Size:* ${item.size || "Standard"}`,
+      `*Product Link:* ${productUrl}`,
       ``,
-      `🛍️ *Product / پروڈکٹ:* ${productName}`,
-      `📏 *Size / سائز:* ${item.size || "Standard / Available"}`,
-      priceText ? `💰 *Price / قیمت:* ${priceText} Rs` : null,
-      ``,
-      `🔗 *Order Link / آرڈر کا لنک:*`,
-      `${productUrl}`,
-      ``,
-      `Stock is limited, order now before it sells out again!`,
-      `اسٹاک محدود ہے، ختم ہونے سے پہلے ابھی آرڈر کریں۔ شکریہ!`,
-      `----------------------------------------`,
-      `*Irha's Wardrobe Customer Support*`,
+      `Good news! This product is back in stock. You can order it now.`,
+      `خوشخبری! یہ پروڈکٹ دوبارہ اسٹاک میں دستیاب ہے۔ آپ ابھی آرڈر کر سکتے ہیں۔`,
     ].filter(Boolean)
 
     const message = messageLines.join("\n")

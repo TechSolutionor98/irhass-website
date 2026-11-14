@@ -14,7 +14,7 @@ const Footer = lazyWithRetry(() => import("./Footer"))
 const BlogFooter = lazyWithRetry(() => import("./BlogFooter"))
 
 // Centralized company WhatsApp number from config.js
-const WHATSAPP_NUMBER = config.COMPANY_WHATSAPP_NUMBER || "923257847744"
+const WHATSAPP_NUMBER = config.COMPANY_WHATSAPP_NUMBER || "923214980835"
 
 /**
  * Floating WhatsApp button.

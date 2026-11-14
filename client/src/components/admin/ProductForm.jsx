@@ -55,6 +55,17 @@ const limitWords = (text = "", maxWords = SEO_TITLE_MAX_WORDS) => {
   return words.slice(0, maxWords).join(" ")
 }
 
+// In-memory cache for static options so opening ProductForm takes 0ms
+const formStaticCache = {
+  countries: null,
+  sizes: null,
+  taxes: null,
+  parentCategories: null,
+  brands: null,
+  subCategories: new Map(),
+  childrenMap: new Map(),
+}
+
 const ProductForm = ({ product, onSubmit, onCancel }) => {
   const { showToast } = useToast()
   const [categories, setCategories] = useState([])
@@ -191,23 +202,27 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
   useEffect(() => {
     const syncSeoLockState = () => setIsSeoUnlocked(isSeoUnlockTokenValid())
     syncSeoLockState()
-    const intervalId = window.setInterval(syncSeoLockState, 1000)
     window.addEventListener("storage", syncSeoLockState)
     window.addEventListener("focus", syncSeoLockState)
     return () => {
-      window.clearInterval(intervalId)
       window.removeEventListener("storage", syncSeoLockState)
       window.removeEventListener("focus", syncSeoLockState)
     }
   }, [])
 
-  // Fetch active countries from backend
+  // Fetch active countries from backend (cached)
   useEffect(() => {
     const fetchCountries = async () => {
+      if (formStaticCache.countries) {
+        setAvailableCountries(formStaticCache.countries)
+        return
+      }
       try {
         const { data } = await axios.get(`${config.API_URL}/api/countries/active`)
         if (Array.isArray(data) && data.length > 0) {
-          setAvailableCountries(data.map((c) => ({ code: c.code, name: c.name })))
+          const list = data.map((c) => ({ code: c.code, name: c.name }))
+          formStaticCache.countries = list
+          setAvailableCountries(list)
         }
       } catch (error) {
         try {
@@ -215,7 +230,9 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
           if (Array.isArray(data) && data.length > 0) {
             const active = data.filter((c) => c.isActive !== false)
             if (active.length > 0) {
-              setAvailableCountries(active.map((c) => ({ code: c.code, name: c.name })))
+              const list = active.map((c) => ({ code: c.code, name: c.name }))
+              formStaticCache.countries = list
+              setAvailableCountries(list)
             }
           }
         } catch (e) {
@@ -226,13 +243,19 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
     fetchCountries()
   }, [])
 
-  // Fetch taxes from backend
+  // Fetch sizes from backend (cached)
   useEffect(() => {
     const fetchSizes = async () => {
+      if (formStaticCache.sizes) {
+        setAvailableSizes(formStaticCache.sizes)
+        return
+      }
       try {
         const { data } = await axios.get(`${config.API_URL}/api/sizes`)
         if (Array.isArray(data)) {
-          setAvailableSizes(data.filter((s) => s.isActive !== false))
+          const active = data.filter((s) => s.isActive !== false)
+          formStaticCache.sizes = active
+          setAvailableSizes(active)
         }
       } catch (error) {
         console.error("Failed to load sizes:", error)
@@ -241,8 +264,13 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
     fetchSizes()
   }, [])
 
+  // Fetch taxes from backend (cached)
   useEffect(() => {
     const fetchTaxes = async () => {
+      if (formStaticCache.taxes) {
+        setTaxes(formStaticCache.taxes)
+        return
+      }
       try {
         const token = localStorage.getItem("adminToken")
         const { data } = await axios.get(`${config.API_URL}/api/tax`, {
@@ -250,7 +278,8 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
             Authorization: `Bearer ${token}`,
           },
         })
-        setTaxes(data)
+        formStaticCache.taxes = data || []
+        setTaxes(data || [])
       } catch (error) {
         setTaxes([])
         console.error("Failed to load taxes:", error)
@@ -362,174 +391,171 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
         setSelectedProductSizes([])
       }
 
-      const preload = async () => {
-        if (parentId) {
-          await fetchSubCategories(String(parentId))
-        }
-        
-        // Preload subcategories for levels 2, 3, 4 if they exist
-        if (product.category) {
-          const categoryId = typeof product.category === "object" ? product.category._id : product.category
-          await fetchSubCategories2(String(categoryId))
-        }
-        if (product.subCategory2) {
-          const sub2Id = typeof product.subCategory2 === "object" ? product.subCategory2._id : product.subCategory2
-          await fetchSubCategories3(String(sub2Id))
-        }
-        if (product.subCategory3) {
-          const sub3Id = typeof product.subCategory3 === "object" ? product.subCategory3._id : product.subCategory3
-          await fetchSubCategories4(String(sub3Id))
-        }
-
-        setFormData({
-          name: product.name || "",
-          sku: product.sku || "",
-          slug: product.slug || "",
-          barcode: product.barcode || "",
-          gtin: product.gtin || "",
-          brand:
-            (typeof product.brand === "object" && product.brand ? product.brand._id : product.brand)
-              ? String(typeof product.brand === "object" && product.brand ? product.brand._id : product.brand)
+      // Populate all form fields synchronously in 0ms so the user sees everything immediately
+      setFormData({
+        name: product.name || "",
+        sku: product.sku || "",
+        slug: product.slug || "",
+        barcode: product.barcode || "",
+        gtin: product.gtin || "",
+        brand:
+          (typeof product.brand === "object" && product.brand ? product.brand._id : product.brand)
+            ? String(typeof product.brand === "object" && product.brand ? product.brand._id : product.brand)
+            : "",
+        series:
+          (typeof product.series === "object" && product.series ? product.series._id : product.series)
+            ? String(typeof product.series === "object" && product.series ? product.series._id : product.series)
+            : "",
+        model:
+          (typeof product.model === "object" && product.model ? product.model._id : product.model)
+            ? String(typeof product.model === "object" && product.model ? product.model._id : product.model)
+            : "",
+        make:
+          (typeof product.make === "object" && product.make ? product.make._id : product.make)
+            ? String(typeof product.make === "object" && product.make ? product.make._id : product.make)
+            : "",
+        manufacturer:
+          (typeof product.manufacturer === "object" && product.manufacturer
+            ? product.manufacturer._id
+            : product.manufacturer)
+            ? String(
+                typeof product.manufacturer === "object" && product.manufacturer
+                  ? product.manufacturer._id
+                  : product.manufacturer,
+              )
+            : "",
+        soldBy:
+          (typeof product.soldBy === "object" && product.soldBy ? product.soldBy._id : product.soldBy)
+            ? String(typeof product.soldBy === "object" && product.soldBy ? product.soldBy._id : product.soldBy)
+            : "",
+        parentCategory: parentId ? String(parentId) : "",
+        category: resolvedCategoryId ? String(resolvedCategoryId) : "",
+        subCategory:
+          (typeof product.subCategory === "object" && product.subCategory ? product.subCategory._id : product.subCategory)
+            ? String(
+                typeof product.subCategory === "object" && product.subCategory
+                  ? product.subCategory._id
+                  : product.subCategory,
+              )
+            : "",
+        subCategory2:
+          (typeof product.subCategory2 === "object" && product.subCategory2 ? product.subCategory2._id : product.subCategory2)
+            ? String(
+                typeof product.subCategory2 === "object" && product.subCategory2
+                  ? product.subCategory2._id
+                  : product.subCategory2,
+              )
+            : "",
+        subCategory3:
+          (typeof product.subCategory3 === "object" && product.subCategory3 ? product.subCategory3._id : product.subCategory3)
+            ? String(
+                typeof product.subCategory3 === "object" && product.subCategory3
+                  ? product.subCategory3._id
+                  : product.subCategory3,
+              )
+            : "",
+        subCategory4:
+          (typeof product.subCategory4 === "object" && product.subCategory4 ? product.subCategory4._id : product.subCategory4)
+            ? String(
+                typeof product.subCategory4 === "object" && product.subCategory4
+                  ? product.subCategory4._id
+                  : product.subCategory4,
+              )
+            : "",
+        description: product.description || "",
+        shortDescription: product.shortDescription || "",
+        buyingPrice: product.buyingPrice || "",
+        wholesalePrice: product.wholesalePrice ?? "",
+        price: product.price || "",
+        offerPrice: product.offerPrice || "",
+        discount: product.discount || "",
+        image: product.image || "",
+        galleryImages: product.galleryImages || [],
+        video: product.video || "",
+        videoGallery: product.videoGallery || [],
+        countInStock:
+          product.sizes && Array.isArray(product.sizes) && product.sizes.length > 0
+            ? product.sizes.reduce((sum, s) => sum + (Number(s.countInStock) || 0), 0).toString()
+            : product.countInStock !== undefined && product.countInStock !== null
+              ? product.countInStock.toString()
               : "",
-          series:
-            (typeof product.series === "object" && product.series ? product.series._id : product.series)
-              ? String(typeof product.series === "object" && product.series ? product.series._id : product.series)
-              : "",
-          model:
-            (typeof product.model === "object" && product.model ? product.model._id : product.model)
-              ? String(typeof product.model === "object" && product.model ? product.model._id : product.model)
-              : "",
-          make:
-            (typeof product.make === "object" && product.make ? product.make._id : product.make)
-              ? String(typeof product.make === "object" && product.make ? product.make._id : product.make)
-              : "",
-          manufacturer:
-            (typeof product.manufacturer === "object" && product.manufacturer
-              ? product.manufacturer._id
-              : product.manufacturer)
-              ? String(
-                  typeof product.manufacturer === "object" && product.manufacturer
-                    ? product.manufacturer._id
-                    : product.manufacturer,
-                )
-              : "",
-          soldBy:
-            (typeof product.soldBy === "object" && product.soldBy ? product.soldBy._id : product.soldBy)
-              ? String(typeof product.soldBy === "object" && product.soldBy ? product.soldBy._id : product.soldBy)
-              : "",
-          parentCategory: parentId ? String(parentId) : "",
-          category: resolvedCategoryId ? String(resolvedCategoryId) : "",
-          subCategory:
-            (typeof product.subCategory === "object" && product.subCategory ? product.subCategory._id : product.subCategory)
-              ? String(
-                  typeof product.subCategory === "object" && product.subCategory
-                    ? product.subCategory._id
-                    : product.subCategory,
-                )
-              : "",
-          subCategory2:
-            (typeof product.subCategory2 === "object" && product.subCategory2 ? product.subCategory2._id : product.subCategory2)
-              ? String(
-                  typeof product.subCategory2 === "object" && product.subCategory2
-                    ? product.subCategory2._id
-                    : product.subCategory2,
-                )
-              : "",
-          subCategory3:
-            (typeof product.subCategory3 === "object" && product.subCategory3 ? product.subCategory3._id : product.subCategory3)
-              ? String(
-                  typeof product.subCategory3 === "object" && product.subCategory3
-                    ? product.subCategory3._id
-                    : product.subCategory3,
-                )
-              : "",
-          subCategory4:
-            (typeof product.subCategory4 === "object" && product.subCategory4 ? product.subCategory4._id : product.subCategory4)
-              ? String(
-                  typeof product.subCategory4 === "object" && product.subCategory4
-                    ? product.subCategory4._id
-                    : product.subCategory4,
-                )
-              : "",
-          description: product.description || "",
-          shortDescription: product.shortDescription || "",
-          buyingPrice: product.buyingPrice || "",
-          wholesalePrice: product.wholesalePrice ?? "",
-          price: product.price || "",
-          offerPrice: product.offerPrice || "",
-          discount: product.discount || "",
-          image: product.image || "",
-          galleryImages: product.galleryImages || [],
-          video: product.video || "",
-          videoGallery: product.videoGallery || [],
-          countInStock:
-            product.sizes && Array.isArray(product.sizes) && product.sizes.length > 0
-              ? product.sizes.reduce((sum, s) => sum + (Number(s.countInStock) || 0), 0).toString()
-              : product.countInStock !== undefined && product.countInStock !== null
-                ? product.countInStock.toString()
-                : "",
-          targetCountries: Array.isArray(product.targetCountries) && product.targetCountries.length > 0 ? product.targetCountries : ["ALL"],
-          countryStock: (() => {
-            const stockMap = { AE: 0, SA: 0, QA: 0, OM: 0, BH: 0, KW: 0 }
-            if (Array.isArray(product.countryStock)) {
-              product.countryStock.forEach((cs) => {
-                if (cs && cs.country) stockMap[cs.country] = cs.countInStock || 0
-              })
-            }
-            return stockMap
-          })(),
-          lowStockWarning: product.lowStockWarning || "5",
-          maxPurchaseQty: product.maxPurchaseQty || "10",
-          weight: product.weight || "",
-          unit: product.unit || "piece",
-          tax:
-            (typeof product.tax === "object" && product.tax ? product.tax._id : product.tax)
-              ? String(typeof product.tax === "object" && product.tax ? product.tax._id : product.tax)
-              : "0",
-          tags: Array.isArray(product.tags) ? product.tags.join(", ") : "",
-          specifications: product.specifications || [],
-          loyaltyPointsMode: product.loyaltyPointsMode || "inherit",
-          loyaltyPointsMultiplier:
-            product.loyaltyPointsMultiplier !== undefined ? product.loyaltyPointsMultiplier : 1,
-          loyaltyPointsFixed: product.loyaltyPointsFixed !== undefined ? product.loyaltyPointsFixed : 0,
-          isActive: product.isActive !== undefined ? product.isActive : true,
-          canPurchase: product.canPurchase !== undefined ? product.canPurchase : true,
-          showStockOut: product.showStockOut !== undefined ? product.showStockOut : true,
-          refundable: product.refundable !== undefined ? product.refundable : true,
-          featured: product.featured || false,
-          hideFromShop: product.hideFromShop || false,
-          stockStatus: product.stockStatus || "In Stock",
-          seoTitle: product.seoTitle || "",
-          seoDescription: product.seoDescription || "",
-          seoKeywords: product.seoKeywords || "",
-          seoCanonicalUrl: product.seoCanonicalUrl || "",
-          seoRobots: product.seoRobots || "index, follow",
-          customSchema: product.customSchema || "",
-          ogTitle: product.ogTitle || "",
-          ogDescription: product.ogDescription || "",
-          ogImage: product.ogImage || "",
-          variationsDisplayType: product.variationsDisplayType || "button",
-          availableModelsDisplayType: product.availableModelsDisplayType || "button",
-          colorVariationsDisplayType: product.colorVariationsDisplayType || "card",
-        })
-        
-        // Set video source type based on existing video URL
-        if (product.video) {
-          if (isYouTubeUrl(product.video)) {
-            setVideoSourceType("youtube")
-            setYoutubeUrl(product.video)
-          } else {
-            setVideoSourceType("upload")
+        targetCountries: Array.isArray(product.targetCountries) && product.targetCountries.length > 0 ? product.targetCountries : ["ALL"],
+        countryStock: (() => {
+          const stockMap = { AE: 0, SA: 0, QA: 0, OM: 0, BH: 0, KW: 0 }
+          if (Array.isArray(product.countryStock)) {
+            product.countryStock.forEach((cs) => {
+              if (cs && cs.country) stockMap[cs.country] = cs.countInStock || 0
+            })
           }
+          return stockMap
+        })(),
+        lowStockWarning: product.lowStockWarning || "5",
+        maxPurchaseQty: product.maxPurchaseQty || "10",
+        weight: product.weight || "",
+        unit: product.unit || "piece",
+        tax:
+          (typeof product.tax === "object" && product.tax ? product.tax._id : product.tax)
+            ? String(typeof product.tax === "object" && product.tax ? product.tax._id : product.tax)
+            : "0",
+        tags: Array.isArray(product.tags) ? product.tags.join(", ") : "",
+        specifications: product.specifications || [],
+        loyaltyPointsMode: product.loyaltyPointsMode || "inherit",
+        loyaltyPointsMultiplier:
+          product.loyaltyPointsMultiplier !== undefined ? product.loyaltyPointsMultiplier : 1,
+        loyaltyPointsFixed: product.loyaltyPointsFixed !== undefined ? product.loyaltyPointsFixed : 0,
+        isActive: product.isActive !== undefined ? product.isActive : true,
+        canPurchase: product.canPurchase !== undefined ? product.canPurchase : true,
+        showStockOut: product.showStockOut !== undefined ? product.showStockOut : true,
+        refundable: product.refundable !== undefined ? product.refundable : true,
+        featured: product.featured || false,
+        hideFromShop: product.hideFromShop || false,
+        stockStatus: product.stockStatus || "In Stock",
+        seoTitle: product.seoTitle || "",
+        seoDescription: product.seoDescription || "",
+        seoKeywords: product.seoKeywords || "",
+        seoCanonicalUrl: product.seoCanonicalUrl || "",
+        seoRobots: product.seoRobots || "index, follow",
+        customSchema: product.customSchema || "",
+        ogTitle: product.ogTitle || "",
+        ogDescription: product.ogDescription || "",
+        ogImage: product.ogImage || "",
+        variationsDisplayType: product.variationsDisplayType || "button",
+        availableModelsDisplayType: product.availableModelsDisplayType || "button",
+        colorVariationsDisplayType: product.colorVariationsDisplayType || "card",
+      })
+
+      if (product.video) {
+        if (isYouTubeUrl(product.video)) {
+          setVideoSourceType("youtube")
+          setYoutubeUrl(product.video)
+        } else {
+          setVideoSourceType("upload")
         }
+      }
+
+      // Preload subcategory options in parallel without blocking form display
+      const preload = () => {
+        const catId = typeof product.category === "object" ? product.category?._id : product.category
+        const s2Id = typeof product.subCategory2 === "object" ? product.subCategory2?._id : product.subCategory2
+        const s3Id = typeof product.subCategory3 === "object" ? product.subCategory3?._id : product.subCategory3
+        Promise.all([
+          parentId ? fetchSubCategories(String(parentId)) : null,
+          catId ? fetchSubCategories2(String(catId)) : null,
+          s2Id ? fetchSubCategories3(String(s2Id)) : null,
+          s3Id ? fetchSubCategories4(String(s3Id)) : null,
+        ]).catch((err) => console.error("Parallel preload subcategories error:", err))
       }
 
       preload()
     }
   }, [product]) // Removed taxes from dependencies to prevent recalculation loops
 
-  // Fetch parent categories (main categories)
+  // Fetch parent categories (main categories) - cached
   const fetchParentCategories = async () => {
+    if (formStaticCache.parentCategories) {
+      setParentCategories(formStaticCache.parentCategories)
+      return
+    }
     try {
       const token = localStorage.getItem("adminToken")
       const { data } = await axios.get(`${config.API_URL}/api/categories`, {
@@ -537,17 +563,22 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
           Authorization: `Bearer ${token}`,
         },
       })
-      setParentCategories(data)
+      formStaticCache.parentCategories = data || []
+      setParentCategories(data || [])
     } catch (error) {
       console.error("Failed to load parent categories:", error)
     }
   }
 
-  // Fetch subcategories when parentCategory changes (Level 1)
+  // Guard refs to prevent cascading clearing on initial mount/edit
+  const prevParentCatRef = useRef(formData.parentCategory)
   useEffect(() => {
+    if (prevParentCatRef.current === formData.parentCategory) return
+    const wasSet = !!prevParentCatRef.current
+    prevParentCatRef.current = formData.parentCategory
     if (formData.parentCategory) {
       fetchSubCategories(formData.parentCategory)
-    } else {
+    } else if (wasSet) {
       setSubCategories([])
       setSubCategories2([])
       setSubCategories3([])
@@ -556,11 +587,14 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
     }
   }, [formData.parentCategory])
 
-  // Fetch level 2 subcategories when category (level 1) changes
+  const prevCategoryRef = useRef(formData.category)
   useEffect(() => {
+    if (prevCategoryRef.current === formData.category) return
+    const wasSet = !!prevCategoryRef.current
+    prevCategoryRef.current = formData.category
     if (formData.category) {
       fetchSubCategories2(formData.category)
-    } else {
+    } else if (wasSet) {
       setSubCategories2([])
       setSubCategories3([])
       setSubCategories4([])
@@ -568,28 +602,43 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
     }
   }, [formData.category])
 
-  // Fetch level 3 subcategories when subCategory2 changes
+  const prevSub2Ref = useRef(formData.subCategory2)
   useEffect(() => {
+    if (prevSub2Ref.current === formData.subCategory2) return
+    const wasSet = !!prevSub2Ref.current
+    prevSub2Ref.current = formData.subCategory2
     if (formData.subCategory2) {
       fetchSubCategories3(formData.subCategory2)
-    } else {
+    } else if (wasSet) {
       setSubCategories3([])
       setSubCategories4([])
       setFormData((prev) => ({ ...prev, subCategory3: "", subCategory4: "" }))
     }
   }, [formData.subCategory2])
 
-  // Fetch level 4 subcategories when subCategory3 changes
+  const prevSub3Ref = useRef(formData.subCategory3)
   useEffect(() => {
+    if (prevSub3Ref.current === formData.subCategory3) return
+    const wasSet = !!prevSub3Ref.current
+    prevSub3Ref.current = formData.subCategory3
     if (formData.subCategory3) {
       fetchSubCategories4(formData.subCategory3)
-    } else {
+    } else if (wasSet) {
       setSubCategories4([])
       setFormData((prev) => ({ ...prev, subCategory4: "" }))
     }
   }, [formData.subCategory3])
 
   const fetchSubCategories = async (parentCategoryId) => {
+    if (!parentCategoryId) {
+      setSubCategories([])
+      return
+    }
+    const cached = formStaticCache.subCategories.get(parentCategoryId)
+    if (cached) {
+      setSubCategories(cached)
+      return
+    }
     try {
       const token = localStorage.getItem("adminToken")
       const { data } = await axios.get(`${config.API_URL}/api/subcategories/category/${parentCategoryId}`, {
@@ -597,8 +646,8 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
           Authorization: `Bearer ${token}`,
         },
       })
-      // Filter to only show Level 1 subcategories
-      const level1Subs = data.filter(sub => !sub.level || sub.level === 1)
+      const level1Subs = Array.isArray(data) ? data.filter(sub => !sub.level || sub.level === 1) : []
+      formStaticCache.subCategories.set(parentCategoryId, level1Subs)
       setSubCategories(level1Subs)
     } catch (error) {
       setSubCategories([])
@@ -607,6 +656,15 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
   }
 
   const fetchSubCategories2 = async (parentSubCategoryId) => {
+    if (!parentSubCategoryId) {
+      setSubCategories2([])
+      return
+    }
+    const cached = formStaticCache.childrenMap.get(parentSubCategoryId)
+    if (cached) {
+      setSubCategories2(cached)
+      return
+    }
     try {
       const token = localStorage.getItem("adminToken")
       const { data } = await axios.get(`${config.API_URL}/api/subcategories/children/${parentSubCategoryId}`, {
@@ -614,7 +672,9 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
           Authorization: `Bearer ${token}`,
         },
       })
-      setSubCategories2(data)
+      const list = Array.isArray(data) ? data : []
+      formStaticCache.childrenMap.set(parentSubCategoryId, list)
+      setSubCategories2(list)
     } catch (error) {
       setSubCategories2([])
       console.error("Failed to load subcategories level 2:", error)
@@ -622,6 +682,15 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
   }
 
   const fetchSubCategories3 = async (parentSubCategoryId) => {
+    if (!parentSubCategoryId) {
+      setSubCategories3([])
+      return
+    }
+    const cached = formStaticCache.childrenMap.get(parentSubCategoryId)
+    if (cached) {
+      setSubCategories3(cached)
+      return
+    }
     try {
       const token = localStorage.getItem("adminToken")
       const { data } = await axios.get(`${config.API_URL}/api/subcategories/children/${parentSubCategoryId}`, {
@@ -629,7 +698,9 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
           Authorization: `Bearer ${token}`,
         },
       })
-      setSubCategories3(data)
+      const list = Array.isArray(data) ? data : []
+      formStaticCache.childrenMap.set(parentSubCategoryId, list)
+      setSubCategories3(list)
     } catch (error) {
       setSubCategories3([])
       console.error("Failed to load subcategories level 3:", error)
@@ -637,6 +708,15 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
   }
 
   const fetchSubCategories4 = async (parentSubCategoryId) => {
+    if (!parentSubCategoryId) {
+      setSubCategories4([])
+      return
+    }
+    const cached = formStaticCache.childrenMap.get(parentSubCategoryId)
+    if (cached) {
+      setSubCategories4(cached)
+      return
+    }
     try {
       const token = localStorage.getItem("adminToken")
       const { data } = await axios.get(`${config.API_URL}/api/subcategories/children/${parentSubCategoryId}`, {
@@ -644,7 +724,9 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
           Authorization: `Bearer ${token}`,
         },
       })
-      setSubCategories4(data)
+      const list = Array.isArray(data) ? data : []
+      formStaticCache.childrenMap.set(parentSubCategoryId, list)
+      setSubCategories4(list)
     } catch (error) {
       setSubCategories4([])
       console.error("Failed to load subcategories level 4:", error)
@@ -652,6 +734,10 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
   }
 
   const fetchBrands = async () => {
+    if (formStaticCache.brands) {
+      setBrands(formStaticCache.brands)
+      return
+    }
     try {
       const token = localStorage.getItem("adminToken")
       const { data } = await axios.get(`${config.API_URL}/api/brands`, {
@@ -659,7 +745,8 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
           Authorization: `Bearer ${token}`,
         },
       })
-      setBrands(data)
+      formStaticCache.brands = data || []
+      setBrands(data || [])
     } catch (error) {
       console.error("Failed to load brands:", error)
     }
@@ -676,6 +763,10 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
   }
 
   const fetchAllProductOptions = async () => {
+    if (formStaticCache.productOptions) {
+      setProductOptions(formStaticCache.productOptions)
+      return
+    }
     const [seriesOptions, modelOptions, makeOptions, manufacturerOptions, soldByOptions] = await Promise.all([
       fetchProductOptionsByType("series"),
       fetchProductOptionsByType("model"),
@@ -684,13 +775,15 @@ const ProductForm = ({ product, onSubmit, onCancel }) => {
       fetchProductOptionsByType("sold-by"),
     ])
 
-    setProductOptions({
+    const options = {
       series: seriesOptions,
       model: modelOptions,
       make: makeOptions,
       manufacturer: manufacturerOptions,
       soldBy: soldByOptions,
-    })
+    }
+    formStaticCache.productOptions = options
+    setProductOptions(options)
   }
 
   const handleCreateProductOption = async ({ field, routeType, label }) => {
