@@ -8,12 +8,13 @@ import StaticPageTranslationLoader from "./StaticPageTranslationLoader"
 import StaticPageContentTranslator from "./StaticPageContentTranslator"
 import CartDrawer from "./CartDrawer"
 
+import config from "../config/config"
+
 const Footer = lazyWithRetry(() => import("./Footer"))
 const BlogFooter = lazyWithRetry(() => import("./BlogFooter"))
 
-// The number the float button and the product page both dial. One constant, so the
-// two can never drift apart.
-const WHATSAPP_NUMBER = "923214980835"
+// Centralized company WhatsApp number from config.js
+const WHATSAPP_NUMBER = config.COMPANY_WHATSAPP_NUMBER || "923257847744"
 
 /**
  * Floating WhatsApp button.
@@ -32,9 +33,18 @@ const WHATSAPP_NUMBER = "923214980835"
  * buttons, which is the one place a visitor must be able to tap.
  */
 function WhatsAppButton({ lifted = false }) {
+  const handleClick = (e) => {
+    e.preventDefault()
+    const url = config.getWhatsAppUrl
+      ? config.getWhatsAppUrl("", WHATSAPP_NUMBER)
+      : `https://web.whatsapp.com/send?phone=${WHATSAPP_NUMBER}`
+    window.open(url, "_blank")
+  }
+
   return (
     <a
       href={`https://wa.me/${WHATSAPP_NUMBER}`}
+      onClick={handleClick}
       target="_blank"
       rel="noopener noreferrer"
       className={`group fixed right-4 z-50 flex items-center ${

@@ -35,7 +35,7 @@ router.post(
   "/subscribe",
   optionalAuth,
   asyncHandler(async (req, res) => {
-    const { productId, size, name } = req.body
+    const { productId, size, name, phone } = req.body
     let email = req.body.email
 
     // If user is logged in and didn't specify an email, use logged in account email
@@ -57,6 +57,7 @@ router.post(
       productId,
       email,
       name: name || req.user?.name || "",
+      phone: phone || req.user?.phone || "",
       size,
       user: req.user || null,
     })

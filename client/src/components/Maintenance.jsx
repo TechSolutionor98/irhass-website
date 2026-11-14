@@ -1,12 +1,17 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import config from '../config/config';
 
 const MaintenancePage = () => {
   const navigate = useNavigate();
 
   const handleContactUs = () => {
-    // Open WhatsApp with the provided number
-    window.open(`https://wa.me/923214980835`, '_blank');
+    // Open WhatsApp with the centralized company number (direct to chat)
+    const waNumber = config.COMPANY_WHATSAPP_NUMBER || "923257847744";
+    const waUrl = config.getWhatsAppUrl
+      ? config.getWhatsAppUrl("", waNumber)
+      : `https://web.whatsapp.com/send?phone=${waNumber}`;
+    window.open(waUrl, '_blank');
   };
 
   const handleCheckStatus = () => {

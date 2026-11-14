@@ -6,7 +6,7 @@ import { sendBackInStockEmail, BRAND_ASSETS } from "../utils/emailService.js"
  * Service to handle customer back-in-stock alerts.
  */
 
-export const subscribeToBackInStock = async ({ productId, email, name = "", size = "", user = null }) => {
+export const subscribeToBackInStock = async ({ productId, email, name = "", phone = "", size = "", user = null }) => {
   if (!productId || !email) {
     throw new Error("Product ID and email are required.")
   }
@@ -22,6 +22,7 @@ export const subscribeToBackInStock = async ({ productId, email, name = "", size
   }
 
   const cleanSize = String(size || "").trim()
+  const cleanPhone = String(phone || "").trim()
 
   // Check if an unnotified subscription already exists for this email + product (+ size if specified)
   const query = {
@@ -36,6 +37,19 @@ export const subscribeToBackInStock = async ({ productId, email, name = "", size
   const existing = await BackInStockSubscription.findOne(query)
 
   if (existing) {
+    let updated = false
+    if (cleanPhone && existing.phone !== cleanPhone) {
+      existing.phone = cleanPhone
+      updated = true
+    }
+    if (name && !existing.name) {
+      existing.name = String(name).trim()
+      updated = true
+    }
+    if (updated) {
+      await existing.save()
+    }
+
     const sizeNote = cleanSize ? ` in size ${cleanSize}` : ""
     return {
       success: true,
@@ -50,6 +64,7 @@ export const subscribeToBackInStock = async ({ productId, email, name = "", size
     user: user ? user._id || user : null,
     email: cleanEmail,
     name: (name || user?.name || "").trim(),
+    phone: cleanPhone,
     size: cleanSize,
     notified: false,
     metadata: {

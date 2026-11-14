@@ -57,7 +57,7 @@ import FeaturedProducts from "../components/FeaturedProducts"
 import TranslatedText from "../components/TranslatedText"
 import { preloadTranslations } from "../LanguageModel/translationService"
 
-const WHATSAPP_NUMBER = "923214980835" // Replace with your WhatsApp number
+const WHATSAPP_NUMBER = config.COMPANY_WHATSAPP_NUMBER || "923257847744"
 const TRANSLATION_SKIP_TAGS = new Set(["CODE", "PRE", "KBD", "SAMP", "SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "OPTION"])
 
 const isWorthTranslating = (text) => {
@@ -229,18 +229,34 @@ const ProductDetails = () => {
   // Back-in-Stock Notification state
   const [isSubscribedToStock, setIsSubscribedToStock] = useState(false)
   const [stockSubEmail, setStockSubEmail] = useState("")
+  const [stockSubName, setStockSubName] = useState("")
+  const [stockSubPhone, setStockSubPhone] = useState("")
   const [stockSubLoading, setStockSubLoading] = useState(false)
   const [showStockSubModal, setShowStockSubModal] = useState(false)
 
-  // Sync user email when logged in
+  // Sync user info when logged in or from previously saved details
   useEffect(() => {
     if (user?.email) {
       setStockSubEmail(user.email)
     } else {
-      const saved = localStorage.getItem("lastStockSubEmail") || ""
-      if (saved) setStockSubEmail(saved)
+      const savedEmail = localStorage.getItem("lastStockSubEmail") || ""
+      if (savedEmail) setStockSubEmail(savedEmail)
     }
-  }, [user?.email])
+
+    if (user?.name) {
+      setStockSubName(user.name)
+    } else {
+      const savedName = localStorage.getItem("lastStockSubName") || ""
+      if (savedName) setStockSubName(savedName)
+    }
+
+    if (user?.phone) {
+      setStockSubPhone(user.phone)
+    } else {
+      const savedPhone = localStorage.getItem("lastStockSubPhone") || ""
+      if (savedPhone) setStockSubPhone(savedPhone)
+    }
+  }, [user?.email, user?.name, user?.phone])
 
   // Check if current user is already subscribed to this product's restock alerts (per size if selected)
   useEffect(() => {
@@ -267,16 +283,35 @@ const ProductDetails = () => {
 
   const handleSubscribeStock = async (e) => {
     if (e && e.preventDefault) e.preventDefault()
-    // User-entered email in modal takes priority over account login email
+    
+    // Target inputs with user fallback
+    const targetName = (stockSubName || user?.name || "").trim()
     const targetEmail = (stockSubEmail || user?.email || "").trim()
+    const targetPhone = (stockSubPhone || user?.phone || "").trim()
+
+    if (!targetName) {
+      showToast("Please enter your name.", "error")
+      return
+    }
 
     if (!targetEmail) {
-      setShowStockSubModal(true)
+      showToast("Please enter your email address.", "error")
       return
     }
 
     if (!/^\S+@\S+\.\S+$/.test(targetEmail)) {
       showToast("Please enter a valid email address.", "error")
+      return
+    }
+
+    if (!targetPhone) {
+      showToast("Please enter your WhatsApp number.", "error")
+      return
+    }
+
+    const cleanPhoneDigits = targetPhone.replace(/\D/g, "")
+    if (cleanPhoneDigits.length < 7) {
+      showToast("Please enter a valid WhatsApp phone number.", "error")
       return
     }
 
@@ -288,23 +323,71 @@ const ProductDetails = () => {
       const token = localStorage.getItem("token")
       const headers = token ? { Authorization: `Bearer ${token}` } : {}
 
+      // 1. Save data in backend database
       const response = await axios.post(
         `${config.API_URL}/api/back-in-stock/subscribe`,
         {
           productId: product._id,
           email: targetEmail,
-          name: user?.name || "",
+          name: targetName,
+          phone: targetPhone,
           size: sizeLabel,
         },
         { headers },
       )
 
+      // Persist in localStorage so user details stay remembered
+      localStorage.setItem("lastStockSubName", targetName)
       localStorage.setItem("lastStockSubEmail", targetEmail)
+      localStorage.setItem("lastStockSubPhone", targetPhone)
+      setStockSubName(targetName)
       setStockSubEmail(targetEmail)
+      setStockSubPhone(targetPhone)
       setIsSubscribedToStock(true)
       setShowStockSubModal(false)
+
+      // 2. Open WhatsApp chat with pre-filled bilingual message to company number
+      const companyWaNumber = (config.COMPANY_WHATSAPP_NUMBER || "923257847744").replace(/\D/g, "")
+      // Always point to live website URL so recipient/user can open it from anywhere
+      const liveBase = (config.SITE_URL || "https://irhaas.com").replace(/\/$/, "")
+      const productPageUrl = `${liveBase}/product/${encodeURIComponent(product.slug || product._id)}`
+      const priceText = formatCurrencyPrice ? formatCurrencyPrice(getEffectivePrice()) : `${getEffectivePrice()} Rs`
+      const currentDateTime = new Date().toLocaleString("en-PK", {
+        timeZone: "Asia/Karachi",
+        dateStyle: "medium",
+        timeStyle: "short",
+      })
+
+      const waLines = [
+        "🔔 *RESTOCK NOTIFICATION REQUEST*",
+        "*اسٹاک الرٹ کی درخواست*",
+        "------------------------------------",
+        `🛍️ *Product / پروڈکٹ:* ${product.name || ""}`,
+        `📏 *Size / سائز:* ${sizeLabel ? sizeLabel : "Standard / In-Stock Query"}`,
+        `💰 *Price / قیمت:* ${priceText}`,
+        `🔗 *Product Link:* ${productPageUrl}`,
+        "",
+        "👤 *Customer Information / صارف کی تفصیلات:*",
+        `• *Name / نام:* ${targetName}`,
+        `• *Phone / فون:* ${targetPhone}`,
+        `• *Email / ای میل:* ${targetEmail}`,
+        `• *Date & Time / تاریخ:* ${currentDateTime}`,
+        "------------------------------------",
+        "Please notify me on WhatsApp as soon as this item is back in stock!",
+        "براہ کرم جب یہ پروڈکٹ یا سائز دوبارہ اسٹاک میں آئے تو مجھے واٹس ایپ پر مطلع فرمائیں۔ شکریہ!",
+      ]
+
+      const waMessage = waLines.join("\n")
+      // Direct URL: on desktop directly opens WhatsApp Web chat, on mobile opens WhatsApp app
+      const waUrl = config.getWhatsAppUrl
+        ? config.getWhatsAppUrl(waMessage, companyWaNumber)
+        : `https://web.whatsapp.com/send?phone=${companyWaNumber}&text=${encodeURIComponent(waMessage)}`
+
+      // Open WhatsApp chat in a new tab / mobile app
+      window.open(waUrl, "_blank")
+
       showToast(
-        response.data?.message || `We will email ${targetEmail} as soon as this item is back in stock!`,
+        response.data?.message || "Restock alert registered & WhatsApp opened!",
         "success",
       )
     } catch (err) {
@@ -2370,11 +2453,16 @@ const ProductDetails = () => {
   }
 
   const handleWhatsAppChat = () => {
-    const productLink = `${window.location.origin}${getLocalizedPath(
-      `/product/${encodeURIComponent(product.slug || product._id)}`,
-    )}`
+    const liveBase = (config.SITE_URL || "https://irhaas.com").replace(/\/$/, "")
+    const productPath = getLocalizedPath
+      ? getLocalizedPath(`/product/${encodeURIComponent(product.slug || product._id)}`)
+      : `/product/${encodeURIComponent(product.slug || product._id)}`
+    const productLink = `${liveBase}${productPath}`
     const message = `Hi, I need help with this product: ${product.name}\n${productLink}`
-    window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`, "_blank")
+    const waUrl = config.getWhatsAppUrl
+      ? config.getWhatsAppUrl(message, WHATSAPP_NUMBER)
+      : `https://web.whatsapp.com/send?phone=${WHATSAPP_NUMBER}&text=${encodeURIComponent(message)}`
+    window.open(waUrl, "_blank")
   }
 
   const handleCallbackSubmit = async (e) => {
@@ -2389,8 +2477,9 @@ const ProductDetails = () => {
     setCallbackLoading(true)
 
     try {
-      // Get product link
-      const productLink = `${window.location.origin}/product/${product.slug || product._id}`
+      // Get live product link
+      const liveBase = (config.SITE_URL || "https://irhaas.com").replace(/\/$/, "")
+      const productLink = `${liveBase}/product/${product.slug || product._id}`
       
       // Extract country code from phone number (e.g., "+92 3XX XXXXXXX" -> "+92")
       const countryCode = phoneValue ? phoneValue.split(/\d/)[0] : ""
@@ -3839,9 +3928,9 @@ const ProductDetails = () => {
                           type="button"
                           onClick={() => setShowStockSubModal(true)}
                           className="text-[11px] underline text-emerald-700 hover:text-emerald-900 tracking-normal capitalize flex-shrink-0 cursor-pointer font-medium"
-                          title="Change alert email"
+                          title="Change alert details"
                         >
-                          <TranslatedText>Change email</TranslatedText>
+                          <TranslatedText>Change details</TranslatedText>
                         </button>
                       </div>
                     ) : (
@@ -3866,12 +3955,12 @@ const ProductDetails = () => {
                     <p className="text-center text-[11px] text-stone-500 font-medium">
                       <TranslatedText>
                         {isSubscribedToStock
-                          ? `We will notify you at ${stockSubEmail || user?.email || "your email"} as soon as ${
+                          ? `We will notify you via Email and WhatsApp as soon as ${
                               getCurrentSize() ? `Size ${getCurrentSize().code || getCurrentSize().name}` : "this item"
                             } is restocked.`
                           : getCurrentSize()
-                          ? `Size ${getCurrentSize().code || getCurrentSize().name} is currently out of stock. Activate alert to get an instant email when restocked.`
-                          : "This item is currently out of stock. Activate alert to get an instant email when restocked."}
+                          ? `Size ${getCurrentSize().code || getCurrentSize().name} is currently out of stock. Activate alert to get an instant email & WhatsApp alert when restocked.`
+                          : "This item is currently out of stock. Activate alert to get an instant email & WhatsApp alert when restocked."}
                       </TranslatedText>
                     </p>
                   </div>
@@ -4938,14 +5027,14 @@ const ProductDetails = () => {
                 <div
                   onClick={() => setShowStockSubModal(true)}
                   className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-50 border border-emerald-300 px-3 py-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-emerald-900 text-center cursor-pointer"
-                  title="Click to change email"
+                  title="Click to update alert details"
                 >
                   <CheckCircle size={15} className="text-emerald-600 flex-shrink-0" />
                   <span>
                     <TranslatedText>
                       {getCurrentSize()
                         ? `Alert Active (${getCurrentSize().code || getCurrentSize().name})`
-                        : "We'll Email You"}
+                        : "Alert Active"}
                     </TranslatedText>
                   </span>
                 </div>
@@ -5044,16 +5133,29 @@ const ProductDetails = () => {
               </div>
             </div>
 
-            <form onSubmit={handleSubscribeStock} className="space-y-4">
+            <form onSubmit={handleSubscribeStock} className="space-y-3.5">
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-stone-700 mb-1.5">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-stone-700 mb-1">
+                  <TranslatedText>Full Name</TranslatedText>
+                </label>
+                <div className="relative">
+                  <User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    required
+                    value={stockSubName}
+                    onChange={(e) => setStockSubName(e.target.value)}
+                    placeholder="Enter your full name"
+                    className="w-full pl-10 pr-4 py-2.5 border border-stone-300 text-sm focus:border-stone-900 focus:outline-none"
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-stone-700 mb-1">
                   <TranslatedText>Your Email Address</TranslatedText>
                 </label>
-                {user?.email && (
-                  <p className="text-[11px] text-stone-500 mb-2">
-                    <TranslatedText>Logged in as</TranslatedText> <span className="font-semibold text-stone-800">{user.email}</span>. <TranslatedText>You can keep this or type a different email below.</TranslatedText>
-                  </p>
-                )}
                 <div className="relative">
                   <Mail size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
                   <input
@@ -5062,12 +5164,28 @@ const ProductDetails = () => {
                     value={stockSubEmail}
                     onChange={(e) => setStockSubEmail(e.target.value)}
                     placeholder="Enter your email address"
-                    className="w-full pl-10 pr-4 py-3 border border-stone-300 text-sm focus:border-stone-900 focus:outline-none"
-                    autoFocus
+                    className="w-full pl-10 pr-4 py-2.5 border border-stone-300 text-sm focus:border-stone-900 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-stone-700 mb-1">
+                  <TranslatedText>WhatsApp Number</TranslatedText>
+                </label>
+                <div className="relative">
+                  <Phone size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
+                  <input
+                    type="tel"
+                    required
+                    value={stockSubPhone}
+                    onChange={(e) => setStockSubPhone(e.target.value)}
+                    placeholder="e.g. 0325 7847744"
+                    className="w-full pl-10 pr-4 py-2.5 border border-stone-300 text-sm focus:border-stone-900 focus:outline-none"
                   />
                 </div>
                 <p className="text-[11px] text-stone-500 mt-1.5">
-                  <TranslatedText>We will send an email to this address as soon as this item is back in stock.</TranslatedText>
+                  <TranslatedText>We will notify you via Email and WhatsApp as soon as this item is back in stock.</TranslatedText>
                 </p>
               </div>
 

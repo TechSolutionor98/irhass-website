@@ -24,6 +24,11 @@ const backInStockSubscriptionSchema = mongoose.Schema(
       trim: true,
       default: "",
     },
+    phone: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     size: {
       type: String,
       trim: true,
