@@ -1475,6 +1475,76 @@ export const sendResetPasswordEmail = async (email, name, resetLink) => {
   }
 }
 
+// Send Back-In-Stock notification email to customers
+export const sendBackInStockEmail = async ({
+  email,
+  name,
+  productName,
+  productImage,
+  productPrice,
+  productUrl,
+  size,
+}) => {
+  try {
+    const customerName = escapeHtml(name || "Customer")
+    const pName = escapeHtml(productName || "Your Requested Item")
+    const pPrice = productPrice ? `${Number(productPrice).toLocaleString()} Rs` : ""
+    const pImg = toAbsoluteUrl(productImage)
+    const pUrl = productUrl || `${BRAND_ASSETS.websiteUrl}/shop`
+    const sizeBadge = size
+      ? `<div style="display:inline-block;background-color:#f5f5f4;border:1px solid #d6d3d1;padding:3px 12px;border-radius:4px;font-size:12px;font-weight:600;color:#44403c;margin-top:8px;">Size: ${escapeHtml(size)}</div>`
+      : ""
+
+    const content = `
+      <div style="text-align:center;padding:10px 0;">
+        <div style="display:inline-block;background-color:${BRAND_ASSETS.colors.surface};border:1px solid ${BRAND_ASSETS.colors.borderGold};color:${BRAND_ASSETS.colors.primary};font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;padding:6px 16px;border-radius:20px;margin-bottom:16px;">
+          ✨ BACK IN STOCK
+        </div>
+        <h2 style="font-size:24px;font-weight:700;color:${BRAND_ASSETS.colors.dark};margin:0 0 10px;letter-spacing:-0.5px;">
+          Good News, It's Back!
+        </h2>
+        <p style="font-size:15px;color:${BRAND_ASSETS.colors.textMuted};line-height:1.6;margin:0 auto 24px;max-width:480px;">
+          Hi <strong>${customerName}</strong>,<br />
+          The item you asked to be notified about is officially back in stock at <strong>Irha's Wardrobe</strong>. Secure yours before it sells out again!
+        </p>
+
+        <!-- Product Card -->
+        <div style="background-color:#ffffff;border:1px solid ${BRAND_ASSETS.colors.border};border-radius:12px;padding:20px;margin:24px auto;max-width:380px;text-align:center;box-shadow:0 4px 14px rgba(0,0,0,0.04);">
+          <div style="width:100%;height:260px;overflow:hidden;border-radius:8px;margin-bottom:16px;background-color:#f9f8f6;">
+            <img src="${pImg}" alt="${pName}" style="width:100%;height:100%;object-fit:cover;display:block;" />
+          </div>
+          <h3 style="font-size:17px;font-weight:700;color:${BRAND_ASSETS.colors.dark};margin:0 0 6px;">${pName}</h3>
+          ${pPrice ? `<div style="font-size:18px;font-weight:700;color:${BRAND_ASSETS.colors.primary};margin-bottom:6px;">${pPrice}</div>` : ""}
+          ${sizeBadge}
+        </div>
+
+        <!-- Call to Action Button -->
+        <div style="margin:28px 0 16px;">
+          <a href="${pUrl}" target="_blank" class="btn-gold" style="display:inline-block;padding:15px 40px;font-size:14px;letter-spacing:1px;">
+            SHOP NOW — BEFORE IT SELLS OUT
+          </a>
+        </div>
+        <p style="font-size:12px;color:${BRAND_ASSETS.colors.textSubtle};margin-top:16px;">
+          Stock is strictly limited and orders are processed on a first-come, first-served basis.
+        </p>
+      </div>
+    `
+
+    const html = wrapEmail({
+      title: `${productName || "Product"} is Back in Stock! - Irha's Wardrobe`,
+      content,
+      senderEmail: "info@irhaas.com",
+    })
+
+    const subject = `Good news! "${productName || "Item"}" is back in stock at Irha's Wardrobe ✨`
+    const result = await sendEmail(email, subject, html, "support")
+    return { success: true, messageId: result.messageId }
+  } catch (error) {
+    console.error(`[sendBackInStockEmail] Failed to send email to ${email}:`, error)
+    return { success: false, error: error.message }
+  }
+}
+
 // Backward compatibility exports
 export const sendOrderNotification = sendOrderStatusUpdateEmail
 export const sendTrackingUpdateEmail = sendOrderStatusUpdateEmail

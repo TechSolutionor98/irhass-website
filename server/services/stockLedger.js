@@ -1,6 +1,7 @@
 import Product from "../models/productModel.js"
 import StockMovement from "../models/stockMovementModel.js"
 import cacheService from "./cacheService.js"
+import { notifyBackInStockSubscribers } from "./backInStockService.js"
 
 /**
  * Posting to the stock ledger.
@@ -86,6 +87,12 @@ export const postMovement = async ({
       await cacheService.invalidateEntity("products")
     } catch (cacheErr) {
       console.error("[STOCK] Cache invalidation failed:", cacheErr.message)
+    }
+
+    if (type === "in" && Number(prodDoc.countInStock) > 0 && prodDoc.stockStatus !== "Out of Stock") {
+      notifyBackInStockSubscribers(prodDoc._id).catch((err) =>
+        console.error("[STOCK] Back in stock trigger error:", err.message),
+      )
     }
 
     return await StockMovement.create({

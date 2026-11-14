@@ -36,6 +36,8 @@ import {
   Mail,
   Percent,
   CheckCircle,
+  Bell,
+  Loader2,
 } from "lucide-react"
 import { productsAPI } from "../services/api.js"
 import { trackProductView } from "../utils/gtmTracking"
@@ -224,6 +226,88 @@ const ProductDetails = () => {
   const [selectedProtections, setSelectedProtections] = useState([])
   const [hasProtectionPlans, setHasProtectionPlans] = useState(false)
 
+  // Back-in-Stock Notification state
+  const [isSubscribedToStock, setIsSubscribedToStock] = useState(false)
+  const [stockSubEmail, setStockSubEmail] = useState("")
+  const [stockSubLoading, setStockSubLoading] = useState(false)
+  const [showStockSubModal, setShowStockSubModal] = useState(false)
+
+  // Sync user email when logged in
+  useEffect(() => {
+    if (user?.email) {
+      setStockSubEmail(user.email)
+    }
+  }, [user?.email])
+
+  // Check if current user is already subscribed to this product's restock alerts (per size if selected)
+  useEffect(() => {
+    if (!product?._id) return
+    const emailToCheck = user?.email || localStorage.getItem("lastStockSubEmail")
+    if (!emailToCheck) return
+
+    const curSize = getCurrentSize()
+    const sizeParam = curSize ? `&size=${encodeURIComponent(curSize.code || curSize.name || "")}` : ""
+
+    axios
+      .get(`${config.API_URL}/api/back-in-stock/status/${product._id}?email=${encodeURIComponent(emailToCheck)}${sizeParam}`)
+      .then((res) => {
+        if (res.data?.subscribed) {
+          setIsSubscribedToStock(true)
+        } else {
+          setIsSubscribedToStock(false)
+        }
+      })
+      .catch(() => {})
+  }, [product?._id, user?.email, selectedSizeIndex])
+
+  const handleSubscribeStock = async (e) => {
+    if (e && e.preventDefault) e.preventDefault()
+    const targetEmail = (user?.email || stockSubEmail || "").trim()
+
+    if (!targetEmail) {
+      setShowStockSubModal(true)
+      return
+    }
+
+    if (!/^\S+@\S+\.\S+$/.test(targetEmail)) {
+      showToast("Please enter a valid email address.", "error")
+      return
+    }
+
+    try {
+      setStockSubLoading(true)
+      const currentSize = getCurrentSize()
+      const sizeLabel = currentSize ? (currentSize.name || currentSize.code || "") : ""
+
+      const token = localStorage.getItem("token")
+      const headers = token ? { Authorization: `Bearer ${token}` } : {}
+
+      const response = await axios.post(
+        `${config.API_URL}/api/back-in-stock/subscribe`,
+        {
+          productId: product._id,
+          email: targetEmail,
+          name: user?.name || "",
+          size: sizeLabel,
+        },
+        { headers },
+      )
+
+      localStorage.setItem("lastStockSubEmail", targetEmail)
+      setIsSubscribedToStock(true)
+      setShowStockSubModal(false)
+      showToast(
+        response.data?.message || `We will email ${targetEmail} as soon as this item is back in stock!`,
+        "success",
+      )
+    } catch (err) {
+      console.error("Back in stock subscription error:", err)
+      showToast(err.response?.data?.message || "Failed to register alert. Please try again.", "error")
+    } finally {
+      setStockSubLoading(false)
+    }
+  }
+
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -379,7 +463,13 @@ const ProductDetails = () => {
       const anyInStock = product.sizes.some((s) => s.countInStock === undefined || Number(s.countInStock) > 0)
       if (!anyInStock) return true
     }
-    if (!currentColor && !currentDos && !currentSize && product?.stockStatus === "Out of Stock") return true
+    if (
+      !currentColor &&
+      !currentDos &&
+      !currentSize &&
+      (product?.stockStatus === "Out of Stock" || (product?.countInStock !== undefined && Number(product?.countInStock) <= 0))
+    )
+      return true
     return false
   }
 
@@ -3200,20 +3290,32 @@ const ProductDetails = () => {
                         <button
                           key={sizeItem._id || index}
                           type="button"
-                          disabled={isOutOfStock}
-                          onClick={() => {
-                            if (!isOutOfStock) handleSelectSize(index)
-                          }}
-                          className={`min-w-[46px] h-10 px-4 rounded border text-sm font-semibold transition-all duration-200 flex items-center justify-center relative ${
+                          onClick={() => handleSelectSize(index)}
+                          className={`min-w-[48px] h-11 px-4 rounded-md border text-sm font-semibold transition-all duration-200 flex items-center justify-center relative cursor-pointer ${
                             isOutOfStock
-                              ? "border-stone-200 bg-stone-100 text-stone-400 cursor-not-allowed opacity-60 line-through"
+                              ? isSelected
+                                ? "border-stone-900 bg-stone-900 text-white shadow-sm ring-2 ring-rose-500/50"
+                                : "border-dashed border-stone-300 bg-stone-50 text-stone-500 hover:border-stone-500 hover:bg-stone-100"
                               : isSelected
-                                ? "border-stone-900 bg-stone-900 text-white shadow-sm ring-2 ring-stone-900/20 cursor-pointer"
-                                : "border-stone-300 bg-white text-stone-800 hover:border-stone-500 hover:bg-stone-50 cursor-pointer"
+                                ? "border-stone-900 bg-stone-900 text-white shadow-sm ring-2 ring-stone-900/20"
+                                : "border-stone-300 bg-white text-stone-800 hover:border-stone-500 hover:bg-stone-50"
                           }`}
-                          title={isOutOfStock ? `${displayLabel} - Out of Stock` : `${displayLabel} (${sizeItem.countInStock || 0} available)`}
+                          title={
+                            isOutOfStock
+                              ? `${displayLabel} - Out of Stock (Click to get restock alert)`
+                              : `${displayLabel} (${sizeItem.countInStock || 0} available)`
+                          }
                         >
-                          {displayLabel}
+                          <span>{displayLabel}</span>
+                          {isOutOfStock && (
+                            <span
+                              className={`absolute -top-1.5 -right-1 text-[8px] font-bold px-1 rounded uppercase tracking-wider ${
+                                isSelected ? "bg-rose-500 text-white" : "bg-rose-100 text-rose-700 border border-rose-300"
+                              }`}
+                            >
+                              Out
+                            </span>
+                          )}
                         </button>
                       )
                     })}
@@ -3644,48 +3746,55 @@ const ProductDetails = () => {
                   so it now sits at the other end of the quantity row. */}
               <div className="mb-5 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs uppercase tracking-[0.14em] text-stone-500">
-                      <TranslatedText>Quantity</TranslatedText>
-                    </span>
-                    <div className="flex items-center border border-stone-300">
-                      <button
-                        onClick={() => handleQuantityChange(-1)}
-                        className="px-3 py-2 text-stone-600 transition-colors hover:text-black disabled:opacity-40"
-                        disabled={quantity === "" || quantity <= 1}
-                        aria-label="Decrease quantity"
-                      >
-                        <Minus size={14} />
-                      </button>
-                      <input
-                        type="number"
-                        value={quantity}
-                        onChange={handleQuantityInput}
-                        onBlur={handleQuantityBlur}
-                        onKeyDown={handleQuantityKeyDown}
-                        aria-label="Quantity"
-                        className="w-12 border-l border-r border-stone-300 bg-transparent py-2 text-center text-sm focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                        min="1"
-                        max={getMaxQuantity()}
-                      />
-                      <button
-                        onClick={() => {
-                          const maxQ = getMaxQuantity()
-                          if (quantity !== "" && quantity >= maxQ) {
-                            const cur = getCurrentSize()
-                            showToast(cur ? `Only ${maxQ} units are available in size ${cur.code || cur.name}.` : `Only ${maxQ} units are available.`, "error")
-                            return
-                          }
-                          handleQuantityChange(1)
-                        }}
-                        className="px-3 py-2 text-stone-600 transition-colors hover:text-black disabled:opacity-40"
-                        disabled={quantity !== "" && quantity >= getMaxQuantity()}
-                        aria-label="Increase quantity"
-                      >
-                        <Plus size={14} />
-                      </button>
+                  {!isEffectiveOutOfStock() ? (
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs uppercase tracking-[0.14em] text-stone-500">
+                        <TranslatedText>Quantity</TranslatedText>
+                      </span>
+                      <div className="flex items-center border border-stone-300">
+                        <button
+                          onClick={() => handleQuantityChange(-1)}
+                          className="px-3 py-2 text-stone-600 transition-colors hover:text-black disabled:opacity-40"
+                          disabled={quantity === "" || quantity <= 1}
+                          aria-label="Decrease quantity"
+                        >
+                          <Minus size={14} />
+                        </button>
+                        <input
+                          type="number"
+                          value={quantity}
+                          onChange={handleQuantityInput}
+                          onBlur={handleQuantityBlur}
+                          onKeyDown={handleQuantityKeyDown}
+                          aria-label="Quantity"
+                          className="w-12 border-l border-r border-stone-300 bg-transparent py-2 text-center text-sm focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                          min="1"
+                          max={getMaxQuantity()}
+                        />
+                        <button
+                          onClick={() => {
+                            const maxQ = getMaxQuantity()
+                            if (quantity !== "" && quantity >= maxQ) {
+                              const cur = getCurrentSize()
+                              showToast(cur ? `Only ${maxQ} units are available in size ${cur.code || cur.name}.` : `Only ${maxQ} units are available.`, "error")
+                              return
+                            }
+                            handleQuantityChange(1)
+                          }}
+                          className="px-3 py-2 text-stone-600 transition-colors hover:text-black disabled:opacity-40"
+                          disabled={quantity !== "" && quantity >= getMaxQuantity()}
+                          aria-label="Increase quantity"
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="inline-flex items-center gap-2 px-3.5 py-2 bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold uppercase tracking-wider">
+                      <span className="w-2 h-2 rounded-full bg-rose-600 inline-block animate-pulse"></span>
+                      <TranslatedText>Currently Sold Out</TranslatedText>
+                    </div>
+                  )}
 
                   <button
                     onClick={() => (isInWishlist(product._id) ? removeFromWishlist(product._id) : addToWishlist(product))}
@@ -3705,22 +3814,78 @@ const ProductDetails = () => {
                   </button>
                 </div>
 
-                <button
-                  onClick={handleAddToCart}
-                  disabled={isEffectiveOutOfStock()}
-                  className="hidden w-full items-center justify-center gap-2 bg-footer-bg px-6 py-4 text-sm font-semibold uppercase tracking-[0.14em] text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-stone-300 disabled:text-stone-500 lg:flex"
-                >
-                  <ShoppingCart size={18} strokeWidth={1.6} />
-                  <TranslatedText>Add to Bag</TranslatedText>
-                </button>
+                {isEffectiveOutOfStock() ? (
+                  <div className="w-full space-y-3 pt-1">
+                    {isSubscribedToStock ? (
+                      <div className="w-full flex items-center justify-center gap-2.5 py-4 px-4 bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-semibold uppercase tracking-[0.12em] text-center">
+                        <CheckCircle size={16} className="text-emerald-600 flex-shrink-0" />
+                        <span>
+                          <TranslatedText>
+                            {getCurrentSize()
+                              ? `Alert Active for Size ${getCurrentSize().code || getCurrentSize().name} — We'll Email You`
+                              : "Alert Active — We'll Email You When Back in Stock"}
+                          </TranslatedText>
+                        </span>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (user?.email) {
+                            handleSubscribeStock()
+                          } else {
+                            setShowStockSubModal(true)
+                          }
+                        }}
+                        disabled={stockSubLoading}
+                        className="w-full flex items-center justify-center gap-2.5 bg-footer-bg hover:bg-stone-800 text-white px-6 py-4 text-xs font-semibold uppercase tracking-[0.14em] transition-colors shadow-sm disabled:opacity-60"
+                      >
+                        {stockSubLoading ? (
+                          <Loader2 size={16} className="animate-spin" />
+                        ) : (
+                          <Bell size={16} className="text-amber-300" />
+                        )}
+                        <TranslatedText>
+                          {getCurrentSize()
+                            ? `Remind Me When Size ${getCurrentSize().code || getCurrentSize().name} is Available`
+                            : user?.email
+                            ? `Remind Me When Available (${user.email})`
+                            : "Remind Me When Available"}
+                        </TranslatedText>
+                      </button>
+                    )}
+                    <p className="text-center text-[11px] text-stone-500 font-medium">
+                      <TranslatedText>
+                        {isSubscribedToStock
+                          ? `We will notify you at ${stockSubEmail || user?.email || "your email"} as soon as ${
+                              getCurrentSize() ? `Size ${getCurrentSize().code || getCurrentSize().name}` : "this item"
+                            } is restocked.`
+                          : getCurrentSize()
+                          ? `Size ${getCurrentSize().code || getCurrentSize().name} is currently out of stock. Activate alert to get an instant email when restocked.`
+                          : "This item is currently out of stock. Activate alert to get an instant email when restocked."}
+                      </TranslatedText>
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      onClick={handleAddToCart}
+                      disabled={isEffectiveOutOfStock()}
+                      className="hidden w-full items-center justify-center gap-2 bg-footer-bg px-6 py-4 text-sm font-semibold uppercase tracking-[0.14em] text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-stone-300 disabled:text-stone-500 lg:flex"
+                    >
+                      <ShoppingCart size={18} strokeWidth={1.6} />
+                      <TranslatedText>Add to Bag</TranslatedText>
+                    </button>
 
-                <button
-                  disabled={isEffectiveOutOfStock()}
-                  className="hidden w-full border border-stone-900 px-6 py-4 text-sm font-semibold uppercase tracking-[0.14em] text-stone-900 transition-colors hover:bg-stone-900 hover:text-white disabled:cursor-not-allowed disabled:border-stone-300 disabled:text-stone-400 disabled:hover:bg-transparent disabled:hover:text-stone-400 lg:block"
-                  onClick={handleBuyNow}
-                >
-                  <TranslatedText>Buy Now</TranslatedText>
-                </button>
+                    <button
+                      disabled={isEffectiveOutOfStock()}
+                      className="hidden w-full border border-stone-900 px-6 py-4 text-sm font-semibold uppercase tracking-[0.14em] text-stone-900 transition-colors hover:bg-stone-900 hover:text-white disabled:cursor-not-allowed disabled:border-stone-300 disabled:text-stone-400 disabled:hover:bg-transparent disabled:hover:text-stone-400 lg:block"
+                      onClick={handleBuyNow}
+                    >
+                      <TranslatedText>Buy Now</TranslatedText>
+                    </button>
+                  </>
+                )}
               </div>
 
               {/* Added-to-bag confirmation, desktop. On a phone the sticky bar below
@@ -4759,24 +4924,166 @@ const ProductDetails = () => {
                 {formatPrice(getEffectivePrice() * ((quantity === "" || isNaN(quantity) || quantity < 1) ? 1 : quantity))}
               </p>
             </div>
-            <button
-              onClick={handleAddToCart}
-              disabled={isEffectiveOutOfStock()}
-              className="flex flex-1 items-center justify-center gap-1.5 border border-stone-900 px-3 py-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-stone-900 disabled:cursor-not-allowed disabled:border-stone-300 disabled:text-stone-400"
-            >
-              <ShoppingCart size={15} strokeWidth={1.8} />
-              <TranslatedText>Add to Bag</TranslatedText>
-            </button>
-            <button
-              onClick={handleBuyNow}
-              disabled={isEffectiveOutOfStock()}
-              className="flex-1 bg-footer-bg px-3 py-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-white disabled:cursor-not-allowed disabled:bg-stone-300 disabled:text-stone-500"
-            >
-              <TranslatedText>Buy Now</TranslatedText>
-            </button>
+            {isEffectiveOutOfStock() ? (
+              isSubscribedToStock ? (
+                <div className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-50 border border-emerald-300 px-3 py-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-emerald-900 text-center">
+                  <CheckCircle size={15} className="text-emerald-600 flex-shrink-0" />
+                  <span>
+                    <TranslatedText>
+                      {getCurrentSize()
+                        ? `Alert Active (${getCurrentSize().code || getCurrentSize().name})`
+                        : "We'll Email You When In Stock"}
+                    </TranslatedText>
+                  </span>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (user?.email) {
+                      handleSubscribeStock()
+                    } else {
+                      setShowStockSubModal(true)
+                    }
+                  }}
+                  disabled={stockSubLoading}
+                  className="flex-1 flex items-center justify-center gap-2 bg-footer-bg px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-white disabled:opacity-60"
+                >
+                  {stockSubLoading ? (
+                    <Loader2 size={15} className="animate-spin" />
+                  ) : (
+                    <Bell size={15} className="text-amber-300" />
+                  )}
+                  <TranslatedText>
+                    {getCurrentSize()
+                      ? `Remind Me (Size ${getCurrentSize().code || getCurrentSize().name})`
+                      : "Remind Me When Available"}
+                  </TranslatedText>
+                </button>
+              )
+            ) : (
+              <>
+                <button
+                  onClick={handleAddToCart}
+                  disabled={isEffectiveOutOfStock()}
+                  className="flex flex-1 items-center justify-center gap-1.5 border border-stone-900 px-3 py-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-stone-900 disabled:cursor-not-allowed disabled:border-stone-300 disabled:text-stone-400"
+                >
+                  <ShoppingCart size={15} strokeWidth={1.8} />
+                  <TranslatedText>Add to Bag</TranslatedText>
+                </button>
+                <button
+                  onClick={handleBuyNow}
+                  disabled={isEffectiveOutOfStock()}
+                  className="flex-1 bg-footer-bg px-3 py-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-white disabled:cursor-not-allowed disabled:bg-stone-300 disabled:text-stone-500"
+                >
+                  <TranslatedText>Buy Now</TranslatedText>
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
+
+      {/* Back In Stock Notification Modal */}
+      {showStockSubModal && product && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowStockSubModal(false)
+          }}
+        >
+          <div className="relative w-full max-w-md bg-white p-6 sm:p-8 shadow-2xl border border-stone-200">
+            <button
+              type="button"
+              onClick={() => setShowStockSubModal(false)}
+              className="absolute right-4 top-4 text-stone-400 hover:text-stone-700 transition"
+              aria-label="Close"
+            >
+              <X size={20} />
+            </button>
+
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-700 flex-shrink-0">
+                <Bell size={20} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold uppercase tracking-wider text-stone-900">
+                  <TranslatedText>Remind Me When Available</TranslatedText>
+                </h3>
+                <p className="text-xs text-stone-500">
+                  <TranslatedText>Irha's Wardrobe Restock Alert</TranslatedText>
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 p-3 bg-stone-50 border border-stone-200 mb-5">
+              {product.image && (
+                <img
+                  src={getFullImageUrl(product.image)}
+                  alt={product.name}
+                  className="w-12 h-14 object-cover border border-stone-200 flex-shrink-0"
+                />
+              )}
+              <div className="min-w-0 flex-1">
+                <h4 className="text-xs font-semibold text-stone-900 truncate">{product.name}</h4>
+                <div className="text-xs font-bold text-brand-700 mt-0.5">
+                  {formatCurrencyPrice ? formatCurrencyPrice(getEffectivePrice()) : `${getEffectivePrice()} Rs`}
+                </div>
+                {getCurrentSize() && (
+                  <span className="inline-block mt-1 text-[10px] font-medium bg-stone-200 text-stone-700 px-1.5 py-0.5 rounded">
+                    Size: {getCurrentSize().code || getCurrentSize().name}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <form onSubmit={handleSubscribeStock} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-stone-700 mb-1.5">
+                  <TranslatedText>Your Email Address</TranslatedText>
+                </label>
+                <div className="relative">
+                  <Mail size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
+                  <input
+                    type="email"
+                    required
+                    value={stockSubEmail}
+                    onChange={(e) => setStockSubEmail(e.target.value)}
+                    placeholder="Enter your email address"
+                    className="w-full pl-10 pr-4 py-3 border border-stone-300 text-sm focus:border-stone-900 focus:outline-none"
+                    autoFocus
+                  />
+                </div>
+                <p className="text-[11px] text-stone-500 mt-1.5">
+                  <TranslatedText>We will send an email to this address as soon as this item is back in stock.</TranslatedText>
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowStockSubModal(false)}
+                  className="w-1/3 py-3 border border-stone-300 text-xs font-semibold uppercase tracking-wider text-stone-700 hover:border-stone-900 transition"
+                >
+                  <TranslatedText>Cancel</TranslatedText>
+                </button>
+                <button
+                  type="submit"
+                  disabled={stockSubLoading}
+                  className="w-2/3 py-3 bg-footer-bg hover:bg-stone-800 text-white text-xs font-semibold uppercase tracking-wider transition flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  {stockSubLoading ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <Bell size={16} className="text-amber-300" />
+                  )}
+                  <TranslatedText>Notify Me</TranslatedText>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       <PromoPopup pageKey="product" delayMs={3000} />
     </div>

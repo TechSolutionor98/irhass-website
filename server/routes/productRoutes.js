@@ -24,6 +24,7 @@ import mongoose from "mongoose"
 import { deleteLocalFile, isCloudinaryUrl } from "../config/multer.js"
 import { requireSeoUnlockIfBodyHas } from "../middleware/seoUnlockMiddleware.js"
 import { submitProduct } from "../services/indexNowService.js"
+import { notifyBackInStockSubscribers } from "../services/backInStockService.js"
 import {
   escapeRegex,
   buildSearchConditions,
@@ -2312,6 +2313,8 @@ router.put(
     const product = await Product.findById(req.params.id)
 
     if (product) {
+      const previousWasOutOfStock =
+        product.stockStatus === "Out of Stock" || Number(product.countInStock) <= 0
       const { parentCategory, category, subCategory2, subCategory3, subCategory4, slug, ...updateData } = req.body
       normalizeProductMediaPayload(updateData)
 
@@ -2625,6 +2628,17 @@ router.put(
 
       // Invalidate product cache
       await invalidateCache('products')
+
+      // Notify back-in-stock subscribers if product is replenished
+      const isNowInStock =
+        updatedProduct.stockStatus === "In Stock" ||
+        (Number(updatedProduct.countInStock) > 0 && updatedProduct.stockStatus !== "Out of Stock")
+
+      if (previousWasOutOfStock && isNowInStock && updatedProduct.isActive && !updatedProduct.isDeleted) {
+        notifyBackInStockSubscribers(updatedProduct._id).catch((err) =>
+          console.error("[BackInStock] Trigger error:", err),
+        )
+      }
 
       // Submit to IndexNow
       if (updatedProduct.isActive && !updatedProduct.isDeleted) {

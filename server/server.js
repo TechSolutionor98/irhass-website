@@ -98,6 +98,7 @@ import homepageRoutes from "./routes/homepageRoutes.js"
 import seoPageRoutes from "./routes/seoPageRoutes.js"
 import staticPageTranslationRoutes from "./routes/staticPageTranslationRoutes.js"
 import arabicConversionRoutes from "./routes/arabicConversionRoutes.js"
+import backInStockRoutes from "./routes/backInStockRoutes.js"
 import productPaymentMethodRoutes from "./routes/productPaymentMethodRoutes.js"
 import countryPaymentMethodRoutes from "./routes/countryPaymentMethodRoutes.js"
 import countryRoutes, { seedDefaultCountries } from "./routes/countryRoutes.js"
@@ -430,6 +431,7 @@ app.use("/api/price-adjustment", priceAdjustmentRoutes)
 app.use("/api/countries", countryRoutes)
 app.use("/api/redirects", redirectRoutes)
 app.use("/api/buyer-protection", buyerProtectionRoutes)
+app.use("/api/back-in-stock", backInStockRoutes)
 app.use("/api/cache", cacheRoutes)
 app.use("/api/custom-slider-items", customSliderItemRoutes)
 app.use("/api/seo-pages", seoPageRoutes)
