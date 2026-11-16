@@ -5,7 +5,7 @@ import axios from "axios"
 import AdminSidebar from "../../components/admin/AdminSidebar"
 import { Search, RefreshCw, X, AlertTriangle, PackageX, Boxes, Wallet, Barcode } from "lucide-react"
 import BarcodeModal from "../../components/admin/BarcodeModal"
-import { getFullImageUrl } from "../../utils/imageUtils"
+import { getFullImageUrl, getImageUrl } from "../../utils/imageUtils"
 import config from "../../config/config"
 
 // Stock and pricing for every product on one screen.
@@ -566,8 +566,10 @@ const Inventory = () => {
                             <div className="flex items-center gap-3">
                               {product.image ? (
                                 <img
-                                  src={getFullImageUrl(product.image)}
+                                  src={getImageUrl(product.image, { width: 80, height: 80, quality: 65 })}
                                   alt=""
+                                  loading="lazy"
+                                  decoding="async"
                                   className="h-10 w-10 shrink-0 rounded object-cover ring-1 ring-gray-200"
                                 />
                               ) : (

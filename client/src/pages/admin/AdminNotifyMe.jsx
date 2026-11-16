@@ -22,7 +22,7 @@ import AdminSidebar from "../../components/admin/AdminSidebar"
 import ConfirmDialog from "../../components/admin/ConfirmDialog"
 import config from "../../config/config"
 import { useToast } from "../../context/ToastContext"
-import { getFullImageUrl } from "../../utils/imageUtils"
+import { getFullImageUrl, getImageUrl } from "../../utils/imageUtils"
 
 const AdminNotifyMe = () => {
   const { showToast } = useToast()
@@ -467,8 +467,10 @@ const AdminNotifyMe = () => {
                           <div className="flex items-center gap-3">
                             {img ? (
                               <img
-                                src={getFullImageUrl(img)}
+                                src={getImageUrl(img, { width: 80, height: 100, quality: 65 })}
                                 alt={productName}
+                                loading="lazy"
+                                decoding="async"
                                 className="h-12 w-9 rounded border border-gray-200 object-cover flex-shrink-0 shadow-sm"
                               />
                             ) : (

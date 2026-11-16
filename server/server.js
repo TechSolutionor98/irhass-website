@@ -225,7 +225,7 @@ app.get('/uploads/*', async (req, res, next) => {
       return res.sendFile(cachedFilePath)
     }
 
-    // If source file is missing locally, attempt fallback fetch from live api.irhaas.com
+    // If source file is missing locally, attempt fallback fetch from live api.irhaas.com (dev only)
     if (!fs.existsSync(absPath)) {
       if (isJpgRequest) {
         const webpPath = absPath.replace(/\.jpe?g$/i, '.webp')
@@ -235,9 +235,17 @@ app.get('/uploads/*', async (req, res, next) => {
       }
 
       if (!fs.existsSync(absPath)) {
+        // Never recurse on production (api.irhaas.com) to prevent 26s event loop deadlock
+        const isLive = process.env.NODE_ENV === "production" || (config.API_URL && config.API_URL.includes("api.irhaas.com"))
+        if (isLive) {
+          return next()
+        }
         try {
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 2000)
           const remoteUrl = `https://api.irhaas.com/uploads/${relPath}`
-          const remoteRes = await fetch(remoteUrl)
+          const remoteRes = await fetch(remoteUrl, { signal: controller.signal })
+          clearTimeout(timeoutId)
           if (remoteRes.ok) {
             const buf = Buffer.from(await remoteRes.arrayBuffer())
             fs.mkdirSync(path.dirname(absPath), { recursive: true })
@@ -297,9 +305,16 @@ app.use('/uploads', async (req, res, next) => {
   if (!absPath.startsWith(path.resolve(uploadsPath))) return next()
 
   if (!fs.existsSync(absPath)) {
+    const isLive = process.env.NODE_ENV === "production" || (config.API_URL && config.API_URL.includes("api.irhaas.com"))
+    if (isLive) {
+      return next()
+    }
     try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 2000)
       const remoteUrl = `https://api.irhaas.com/uploads/${relPath}`
-      const remoteRes = await fetch(remoteUrl)
+      const remoteRes = await fetch(remoteUrl, { signal: controller.signal })
+      clearTimeout(timeoutId)
       if (remoteRes.ok) {
         const buf = Buffer.from(await remoteRes.arrayBuffer())
         fs.mkdirSync(path.dirname(absPath), { recursive: true })
