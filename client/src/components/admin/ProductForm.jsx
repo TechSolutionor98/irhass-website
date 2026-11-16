@@ -2,7 +2,7 @@
 
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import axios from "axios"
 import ImageUpload from "../ImageUpload"
 import VideoUpload from "../VideoUpload"
