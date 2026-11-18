@@ -231,6 +231,7 @@ const ProductDetails = () => {
   const [stockSubEmail, setStockSubEmail] = useState("")
   const [stockSubName, setStockSubName] = useState("")
   const [stockSubPhone, setStockSubPhone] = useState("")
+  const [stockSubCountry, setStockSubCountry] = useState("PK")
   const [stockSubLoading, setStockSubLoading] = useState(false)
   const [showStockSubModal, setShowStockSubModal] = useState(false)
 
@@ -242,34 +243,40 @@ const ProductDetails = () => {
     setKeyFeaturesOpen(false)
   }, [product?._id])
 
-  // Sync user info when logged in or from previously saved details
+  // Clear any legacy stock alert autofill data
   useEffect(() => {
-    if (user?.email) {
-      setStockSubEmail(user.email)
-    } else {
-      const savedEmail = localStorage.getItem("lastStockSubEmail") || ""
-      if (savedEmail) setStockSubEmail(savedEmail)
-    }
+    try {
+      localStorage.removeItem("lastStockSubName")
+      localStorage.removeItem("lastStockSubEmail")
+      localStorage.removeItem("lastStockSubPhone")
+      localStorage.removeItem("lastStockSubCountry")
+    } catch (_) {}
+  }, [])
 
-    if (user?.name) {
-      setStockSubName(user.name)
-    } else {
-      const savedName = localStorage.getItem("lastStockSubName") || ""
-      if (savedName) setStockSubName(savedName)
-    }
+  const handleOpenStockSubModal = () => {
+    setStockSubName("")
+    setStockSubEmail("")
+    setStockSubPhone("")
+    setStockSubCountry("PK")
+    setShowStockSubModal(true)
+  }
 
-    if (user?.phone) {
-      setStockSubPhone(user.phone)
-    } else {
-      const savedPhone = localStorage.getItem("lastStockSubPhone") || ""
-      if (savedPhone) setStockSubPhone(savedPhone)
-    }
-  }, [user?.email, user?.name, user?.phone])
+  const handleCloseStockSubModal = () => {
+    setStockSubName("")
+    setStockSubEmail("")
+    setStockSubPhone("")
+    setStockSubCountry("PK")
+    setShowStockSubModal(false)
+  }
 
   // Check if current user is already subscribed to this product's restock alerts (per size if selected)
   useEffect(() => {
     if (!product?._id) return
-    const emailToCheck = (stockSubEmail || user?.email || localStorage.getItem("lastStockSubEmail") || "").trim()
+    const emailToCheck = (user?.email || "").trim()
+    if (!emailToCheck) {
+      setIsSubscribedToStock(false)
+      return
+    }
 
     const curSize = getCurrentSize()
     const sizeParam = curSize ? `&size=${encodeURIComponent(curSize.code || curSize.name || "")}` : ""
@@ -292,10 +299,10 @@ const ProductDetails = () => {
   const handleSubscribeStock = async (e) => {
     if (e && e.preventDefault) e.preventDefault()
     
-    // Target inputs with user fallback
-    const targetName = (stockSubName || user?.name || "").trim()
-    const targetEmail = (stockSubEmail || user?.email || "").trim()
-    const targetPhone = (stockSubPhone || user?.phone || "").trim()
+    // Read directly from user-typed input (no automatic prefilling)
+    const targetName = (stockSubName || "").trim()
+    const targetEmail = (stockSubEmail || "").trim()
+    const targetPhone = (stockSubPhone || "").trim()
 
     if (!targetName) {
       showToast("Please enter your name.", "error")
@@ -332,6 +339,7 @@ const ProductDetails = () => {
       const headers = token ? { Authorization: `Bearer ${token}` } : {}
 
       // 1. Save data in backend database
+      const finalCountry = String(stockSubCountry || "PK").toUpperCase()
       const response = await axios.post(
         `${config.API_URL}/api/back-in-stock/subscribe`,
         {
@@ -339,18 +347,18 @@ const ProductDetails = () => {
           email: targetEmail,
           name: targetName,
           phone: targetPhone,
+          country: finalCountry,
+          countryCode: finalCountry,
           size: sizeLabel,
         },
         { headers },
       )
 
-      // Persist in localStorage so user details stay remembered
-      localStorage.setItem("lastStockSubName", targetName)
-      localStorage.setItem("lastStockSubEmail", targetEmail)
-      localStorage.setItem("lastStockSubPhone", targetPhone)
-      setStockSubName(targetName)
-      setStockSubEmail(targetEmail)
-      setStockSubPhone(targetPhone)
+      // Reset form states so fields stay clean and never auto-fill
+      setStockSubName("")
+      setStockSubEmail("")
+      setStockSubPhone("")
+      setStockSubCountry("PK")
       setIsSubscribedToStock(true)
       setShowStockSubModal(false)
 
@@ -3945,7 +3953,7 @@ const ProductDetails = () => {
                         </div>
                         <button
                           type="button"
-                          onClick={() => setShowStockSubModal(true)}
+                          onClick={handleOpenStockSubModal}
                           className="text-[11px] underline text-emerald-700 hover:text-emerald-900 tracking-normal capitalize flex-shrink-0 cursor-pointer font-medium"
                           title="Change alert details"
                         >
@@ -3955,7 +3963,7 @@ const ProductDetails = () => {
                     ) : (
                       <button
                         type="button"
-                        onClick={() => setShowStockSubModal(true)}
+                        onClick={handleOpenStockSubModal}
                         disabled={stockSubLoading}
                         className="w-full flex items-center justify-center gap-2.5 bg-footer-bg hover:bg-stone-800 text-white px-6 py-4 text-xs font-semibold uppercase tracking-[0.14em] transition-colors shadow-sm disabled:opacity-60 cursor-pointer"
                       >
@@ -5044,7 +5052,7 @@ const ProductDetails = () => {
             {isEffectiveOutOfStock() ? (
               isSubscribedToStock ? (
                 <div
-                  onClick={() => setShowStockSubModal(true)}
+                  onClick={handleOpenStockSubModal}
                   className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-50 border border-emerald-300 px-3 py-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-emerald-900 text-center cursor-pointer"
                   title="Click to update alert details"
                 >
@@ -5060,7 +5068,7 @@ const ProductDetails = () => {
               ) : (
                 <button
                   type="button"
-                  onClick={() => setShowStockSubModal(true)}
+                  onClick={handleOpenStockSubModal}
                   disabled={stockSubLoading}
                   className="flex-1 flex items-center justify-center gap-2 bg-footer-bg px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-white disabled:opacity-60 cursor-pointer"
                 >
@@ -5104,13 +5112,13 @@ const ProductDetails = () => {
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
           onClick={(e) => {
-            if (e.target === e.currentTarget) setShowStockSubModal(false)
+            if (e.target === e.currentTarget) handleCloseStockSubModal()
           }}
         >
           <div className="relative w-full max-w-md bg-white p-6 sm:p-8 shadow-2xl border border-stone-200">
             <button
               type="button"
-              onClick={() => setShowStockSubModal(false)}
+              onClick={handleCloseStockSubModal}
               className="absolute right-4 top-4 text-stone-400 hover:text-stone-700 transition"
               aria-label="Close"
             >
@@ -5152,7 +5160,7 @@ const ProductDetails = () => {
               </div>
             </div>
 
-            <form onSubmit={handleSubscribeStock} className="space-y-3.5">
+            <form onSubmit={handleSubscribeStock} className="space-y-3.5" autoComplete="off">
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-stone-700 mb-1">
                   <TranslatedText>Full Name</TranslatedText>
@@ -5161,6 +5169,12 @@ const ProductDetails = () => {
                   <User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
                   <input
                     type="text"
+                    name="stock_alert_fullname"
+                    id="stock_alert_fullname"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="words"
+                    spellCheck="false"
                     required
                     value={stockSubName}
                     onChange={(e) => setStockSubName(e.target.value)}
@@ -5179,6 +5193,12 @@ const ProductDetails = () => {
                   <Mail size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
                   <input
                     type="email"
+                    name="stock_alert_email"
+                    id="stock_alert_email"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck="false"
                     required
                     value={stockSubEmail}
                     onChange={(e) => setStockSubEmail(e.target.value)}
@@ -5192,26 +5212,101 @@ const ProductDetails = () => {
                 <label className="block text-xs font-semibold uppercase tracking-wider text-stone-700 mb-1">
                   <TranslatedText>WhatsApp Number</TranslatedText>
                 </label>
-                <div className="relative">
-                  <Phone size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
-                  <input
-                    type="tel"
-                    required
+                <div className="stock-sub-phone-box">
+                  <PhoneInput
+                    international
+                    defaultCountry={stockSubCountry || "PK"}
+                    country={stockSubCountry || "PK"}
+                    onCountryChange={(c) => setStockSubCountry(c || "PK")}
                     value={stockSubPhone}
-                    onChange={(e) => setStockSubPhone(e.target.value)}
+                    onChange={(val) => setStockSubPhone(val || "")}
                     placeholder="Enter your WhatsApp number"
-                    className="w-full pl-10 pr-4 py-2.5 border border-stone-300 text-sm focus:border-stone-900 focus:outline-none"
+                    className="stock-sub-phone-input"
+                    numberInputProps={{
+                      autoComplete: "off",
+                      name: "stock_alert_phone",
+                      id: "stock_alert_phone",
+                      autoCorrect: "off",
+                      spellCheck: "false",
+                    }}
                   />
                 </div>
                 <p className="text-[11px] text-stone-500 mt-1.5">
                   <TranslatedText>We will notify you via Email and WhatsApp as soon as this item is back in stock.</TranslatedText>
                 </p>
+                <style>{`
+                  .stock-sub-phone-box .PhoneInput {
+                    display: flex;
+                    align-items: center;
+                    width: 100%;
+                    border: 1px solid #d6d3d1;
+                    background-color: #ffffff;
+                    padding: 0.35rem 0.65rem;
+                    transition: border-color 0.15s ease-in-out;
+                  }
+                  .stock-sub-phone-box .PhoneInput:focus-within {
+                    border-color: #1c1917;
+                    box-shadow: 0 0 0 1px #1c1917;
+                  }
+                  .stock-sub-phone-box .PhoneInputCountry {
+                    display: flex;
+                    align-items: center;
+                    position: relative;
+                    margin-right: 0.65rem;
+                    padding-right: 0.5rem;
+                    border: none;
+                    border-right: 1px solid #e7e5e4;
+                    background: transparent;
+                    cursor: pointer;
+                  }
+                  .stock-sub-phone-box .PhoneInputCountryIcon {
+                    width: 1.5rem;
+                    height: 1rem;
+                    border-radius: 2px;
+                    box-shadow: 0 0 1px rgba(0,0,0,0.3);
+                  }
+                  .stock-sub-phone-box .PhoneInputCountrySelect {
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    height: 100%;
+                    width: 100%;
+                    z-index: 10;
+                    opacity: 0;
+                    cursor: pointer;
+                  }
+                  .stock-sub-phone-box .PhoneInputCountrySelectArrow {
+                    margin-left: 0.35rem;
+                    width: 0.35rem;
+                    height: 0.35rem;
+                    border-style: solid;
+                    border-color: #78716c;
+                    border-width: 0 1.5px 1.5px 0;
+                    transform: rotate(45deg);
+                    opacity: 0.75;
+                  }
+                  .stock-sub-phone-box .PhoneInputInput {
+                    flex: 1;
+                    min-width: 0;
+                    border: none !important;
+                    outline: none !important;
+                    box-shadow: none !important;
+                    padding: 0.35rem 0.25rem !important;
+                    font-size: 0.875rem !important;
+                    line-height: 1.25rem !important;
+                    color: #1c1917 !important;
+                    background: transparent !important;
+                  }
+                  .stock-sub-phone-box .PhoneInputInput::placeholder {
+                    color: #9ca3af;
+                  }
+                `}</style>
               </div>
 
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowStockSubModal(false)}
+                  onClick={handleCloseStockSubModal}
                   className="w-1/3 py-3 border border-stone-300 text-xs font-semibold uppercase tracking-wider text-stone-700 hover:border-stone-900 transition"
                 >
                   <TranslatedText>Cancel</TranslatedText>

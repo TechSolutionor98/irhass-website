@@ -24,6 +24,60 @@ import config from "../../config/config"
 import { useToast } from "../../context/ToastContext"
 import { getFullImageUrl, getImageUrl } from "../../utils/imageUtils"
 
+const getCountryDisplay = (countryCode, phone) => {
+  let code = countryCode ? String(countryCode).toUpperCase() : ""
+  if (!code && phone) {
+    const clean = String(phone).replace(/\D/g, "")
+    if (clean.startsWith("92")) code = "PK"
+    else if (clean.startsWith("971")) code = "AE"
+    else if (clean.startsWith("966")) code = "SA"
+    else if (clean.startsWith("44")) code = "GB"
+    else if (clean.startsWith("1")) code = "US"
+    else if (clean.startsWith("974")) code = "QA"
+    else if (clean.startsWith("968")) code = "OM"
+    else if (clean.startsWith("973")) code = "BH"
+    else if (clean.startsWith("965")) code = "KW"
+    else if (clean.startsWith("61")) code = "AU"
+    else if (clean.startsWith("49")) code = "DE"
+    else if (clean.startsWith("91")) code = "IN"
+    else code = "PK"
+  }
+  if (!code) code = "PK"
+
+  const flags = {
+    PK: { flag: "🇵🇰", name: "Pakistan" },
+    AE: { flag: "🇦🇪", name: "UAE" },
+    SA: { flag: "🇸🇦", name: "Saudi Arabia" },
+    GB: { flag: "🇬🇧", name: "UK" },
+    US: { flag: "🇺🇸", name: "USA" },
+    CA: { flag: "🇨🇦", name: "Canada" },
+    QA: { flag: "🇶🇦", name: "Qatar" },
+    OM: { flag: "🇴🇲", name: "Oman" },
+    BH: { flag: "🇧🇭", name: "Bahrain" },
+    KW: { flag: "🇰🇼", name: "Kuwait" },
+    AU: { flag: "🇦🇺", name: "Australia" },
+    DE: { flag: "🇩🇪", name: "Germany" },
+    IN: { flag: "🇮🇳", name: "India" },
+  }
+
+  const flagEmoji = (iso) => {
+    if (!iso || iso.length !== 2) return "🌐"
+    try {
+      const chars = [...iso.toUpperCase()].map((c) => 127397 + c.charCodeAt(0))
+      return String.fromCodePoint(...chars)
+    } catch {
+      return "🌐"
+    }
+  }
+
+  const found = flags[code]
+  return {
+    code,
+    flag: found?.flag || flagEmoji(code),
+    name: found?.name || code,
+  }
+}
+
 const AdminNotifyMe = () => {
   const { showToast } = useToast()
 
@@ -207,18 +261,22 @@ const AdminNotifyMe = () => {
       return
     }
 
-    const headers = ["Customer Name", "Email", "WhatsApp Phone", "Product Name", "Size", "Price", "Status", "Date Requested", "Date Notified"]
-    const rows = subscriptions.map((s) => [
-      `"${(s.name || "").replace(/"/g, '""')}"`,
-      `"${(s.email || "").replace(/"/g, '""')}"`,
-      `"${(s.phone || "").replace(/"/g, '""')}"`,
-      `"${(s.product?.name || s.metadata?.productName || "").replace(/"/g, '""')}"`,
-      `"${(s.size || "All").replace(/"/g, '""')}"`,
-      `"${s.product?.price || s.metadata?.productPrice || 0}"`,
-      `"${s.notified ? "Notified" : "Pending"}"`,
-      `"${s.createdAt ? new Date(s.createdAt).toLocaleString("en-PK") : ""}"`,
-      `"${s.notifiedAt ? new Date(s.notifiedAt).toLocaleString("en-PK") : ""}"`,
-    ])
+    const headers = ["Customer Name", "Email", "WhatsApp Phone", "Country", "Product Name", "Size", "Price", "Status", "Date Requested", "Date Notified"]
+    const rows = subscriptions.map((s) => {
+      const cInfo = getCountryDisplay(s.country || s.countryCode, s.phone)
+      return [
+        `"${(s.name || "").replace(/"/g, '""')}"`,
+        `"${(s.email || "").replace(/"/g, '""')}"`,
+        `"${(s.phone || "").replace(/"/g, '""')}"`,
+        `"${cInfo.name} (${cInfo.code})"`,
+        `"${(s.product?.name || s.metadata?.productName || "").replace(/"/g, '""')}"`,
+        `"${(s.size || "All").replace(/"/g, '""')}"`,
+        `"${s.product?.price || s.metadata?.productPrice || 0}"`,
+        `"${s.notified ? "Notified" : "Pending"}"`,
+        `"${s.createdAt ? new Date(s.createdAt).toLocaleString("en-PK") : ""}"`,
+        `"${s.notifiedAt ? new Date(s.notifiedAt).toLocaleString("en-PK") : ""}"`,
+      ]
+    })
 
     const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((r) => r.join(","))].join("\n")
     const encodedUri = encodeURI(csvContent)
@@ -458,6 +516,20 @@ const AdminNotifyMe = () => {
                                   <span>{sub.phone}</span>
                                 </div>
                               )}
+                              {(() => {
+                                const countryInfo = getCountryDisplay(sub.country || sub.countryCode, sub.phone)
+                                return (
+                                  <div className="flex items-center gap-1 mt-1">
+                                    <span
+                                      className="inline-flex items-center gap-1 rounded bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold text-stone-700 border border-stone-200"
+                                      title={`Customer Country: ${countryInfo.name} (${countryInfo.code})`}
+                                    >
+                                      <span className="text-xs leading-none">{countryInfo.flag}</span>
+                                      <span>{countryInfo.name}</span>
+                                    </span>
+                                  </div>
+                                )
+                              })()}
                             </div>
                           </div>
                         </td>

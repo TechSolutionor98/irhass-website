@@ -29,6 +29,16 @@ const backInStockSubscriptionSchema = mongoose.Schema(
       trim: true,
       default: "",
     },
+    country: {
+      type: String,
+      trim: true,
+      default: "PK",
+    },
+    countryCode: {
+      type: String,
+      trim: true,
+      default: "PK",
+    },
     size: {
       type: String,
       trim: true,
